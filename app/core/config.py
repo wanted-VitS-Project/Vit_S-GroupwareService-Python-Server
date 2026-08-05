@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     # Gemini API 설정
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"
+    # Gemini 실패 시 local 개발용 임시 결과를 사용할지 여부
+    vitamate_ai_fallback_enabled: bool = False
 
     # Spring Boot 내부 API 설정
     spring_base_url: str = "http://localhost:8080"
