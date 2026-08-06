@@ -21,3 +21,7 @@ class SpringVitamateTemporaryError(SpringVitamateClientError):
 class SpringVitamateBadRequestError(SpringVitamateClientError):
     # Python worker가 잘못된 요청을 보낸 경우
     pass
+
+
+class VitamateAiGenerateError(Exception):
+    """비타메이트 AI 분석 생성 실패를 표현합니다."""

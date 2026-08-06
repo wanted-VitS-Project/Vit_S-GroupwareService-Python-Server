@@ -5,6 +5,7 @@ from app.client.dto import (
 )
 from app.client.gemini_client import GeminiClient
 from app.core.config import Settings
+from app.core.exceptions import VitamateAiGenerateError
 from app.service.vitamate_prompt_builder import VitamatePromptBuilder
 
 
@@ -27,7 +28,7 @@ class VitamateAnalysisProcessor:
 
         try:
             result = self._gemini_client.generate_text(prompt)
-        except Exception:
+        except VitamateAiGenerateError:
             if self._settings.vitamate_ai_fallback_enabled:
                 result = self._build_fallback_result(job, citations)
             else:

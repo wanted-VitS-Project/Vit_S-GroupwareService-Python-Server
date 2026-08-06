@@ -5,6 +5,7 @@ from typing import Any
 import redis
 
 from app.service.vitamate_analysis_processor import VitamateAnalysisProcessor
+from app.client.dto import VitamateAnalysisJob, VitamateCallbackRequest
 from app.client.spring_vitamate_client import SpringVitamateClient
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
@@ -12,6 +13,7 @@ from app.core.exceptions import (
     SpringVitamateBadRequestError,
     SpringVitamateJobNotFoundError,
     SpringVitamateTemporaryError,
+    VitamateAiGenerateError,
 )
 from app.worker.message import VitamateAnalysisJobMessage
 
@@ -123,10 +125,27 @@ class VitamateRedisWorker:
 
         try:
             callback = self._processor.analyze(job)
+            if callback.analysis_status == "FAILED":
+                logger.warning(
+                    "Vitamate analysis result marked failed analysisId=%s attemptId=%s reason=%s",
+                    message.analysis_id,
+                    message.attempt_id,
+                    callback.error_message,
+                )
+
             callback_response = self._spring_client.send_callback(
                 analysis_id=job.analysis_id,
                 callback=callback,
             )
+        except VitamateAiGenerateError:
+            logger.exception(
+                "Vitamate AI generation failed analysisId=%s attemptId=%s",
+                message.analysis_id,
+                message.attempt_id,
+            )
+            if self._send_failed_callback(job, "AI analysis failed"):
+                self._ack(message_id)
+            return
         except SpringVitamateAuthError:
             logger.exception(
                 "Vitamate callback auth failed analysisId=%s attemptId=%s",
@@ -149,7 +168,8 @@ class VitamateRedisWorker:
                 message.analysis_id,
                 message.attempt_id,
             )
-            self._ack(message_id)
+            if self._send_failed_callback(job, "AI analysis processing failed"):
+                self._ack(message_id)
             return
 
         logger.info(
@@ -161,6 +181,58 @@ class VitamateRedisWorker:
         )
 
         self._ack(message_id)
+
+    def _send_failed_callback(
+        self,
+        job: VitamateAnalysisJob,
+        error_message: str,
+    ) -> bool:
+        # 분석 실패 상태를 Spring에 저장해 PENDING/PROCESSING 상태가 멈추지 않게 합니다.
+        callback = VitamateCallbackRequest(
+            attemptId=job.attempt_id,
+            analysisStatus="FAILED",
+            result=None,
+            citations=[],
+            errorMessage=error_message,
+        )
+
+        try:
+            callback_response = self._spring_client.send_callback(
+                analysis_id=job.analysis_id,
+                callback=callback,
+            )
+        except SpringVitamateAuthError:
+            logger.exception(
+                "Vitamate failed callback auth failed analysisId=%s attemptId=%s",
+                job.analysis_id,
+                job.attempt_id,
+            )
+            time.sleep(5)
+            return False
+        except SpringVitamateTemporaryError:
+            logger.exception(
+                "Temporary Spring failed callback failure analysisId=%s attemptId=%s",
+                job.analysis_id,
+                job.attempt_id,
+            )
+            time.sleep(5)
+            return False
+        except Exception:
+            logger.exception(
+                "Vitamate failed callback rejected analysisId=%s attemptId=%s",
+                job.analysis_id,
+                job.attempt_id,
+            )
+            return False
+
+        logger.warning(
+            "Vitamate failed callback completed analysisId=%s attemptId=%s accepted=%s status=%s",
+            callback_response.analysis_id,
+            job.attempt_id,
+            callback_response.accepted,
+            callback_response.analysis_status,
+        )
+        return callback_response.accepted
 
     def _ensure_consumer_group(self) -> None:
         # Redis Stream consumer group이 없으면 생성한다.
