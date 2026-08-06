@@ -61,9 +61,11 @@ class VitamateCallbackResponse(BaseModel):
     analysis_status: str = Field(alias="analysisStatus")
     reason: str | None = None
 
+
 class VitamateFileIndexCallbackRequest(BaseModel):
     # Spring file_index callback API로 보낼 인덱싱 상태 변경 요청입니다.
     index_status: str = Field(alias="indexStatus")
+    index_attempt_id: str | None = Field(default=None, alias="indexAttemptId")
     error_message: str | None = Field(default=None, alias="errorMessage")
 
     model_config = {
@@ -75,9 +77,11 @@ class VitamateFileIndexCallbackResponse(BaseModel):
     # Spring file_index callback API 응답입니다.
     accepted: bool
     file_version_id: int = Field(alias="fileVersionId")
+    index_attempt_id: str | None = Field(default=None, alias="indexAttemptId")
     index_status: str = Field(alias="indexStatus")
     reason: str | None = None
-    
+
+
 class VitamateFileIndexSourceResponse(BaseModel):
     # Spring에서 받은 파일 인덱싱 대상 파일 정보입니다.
     file_version_id: int = Field(alias="fileVersionId")
@@ -118,4 +122,34 @@ class VitamateDocumentChunkSaveRequest(BaseModel):
 class VitamateDocumentChunkSaveResponse(BaseModel):
     # Spring chunk 저장 API 응답입니다.
     file_version_id: int = Field(alias="fileVersionId")
+    index_attempt_id: str = Field(alias="indexAttemptId")
     saved_chunk_count: int = Field(alias="savedChunkCount")
+    saved_chunks: list["VitamateSavedDocumentChunk"] = Field(default_factory=list, alias="savedChunks")
+
+
+class VitamateSavedDocumentChunk(BaseModel):
+    # Spring DB에 저장된 document_chunk 식별 정보입니다.
+    document_chunk_id: int = Field(alias="documentChunkId")
+    chunk_index: int = Field(alias="chunkIndex")
+    embedding_status: str = Field(alias="embeddingStatus")
+
+
+class VitamateChunkEmbeddingRequest(BaseModel):
+    # document_chunk와 ChromaDB vector를 연결하는 요청입니다.
+    document_chunk_id: int = Field(alias="documentChunkId")
+    chroma_id: str = Field(alias="chromaId")
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class VitamateChunkEmbeddingSaveRequest(BaseModel):
+    # ChromaDB 저장 결과를 Spring에 반영하는 요청입니다.
+    embedding_model: str = Field(alias="embeddingModel")
+    index_attempt_id: str = Field(alias="indexAttemptId")
+    chunks: list[VitamateChunkEmbeddingRequest]
+
+    model_config = {
+        "populate_by_name": True,
+    }

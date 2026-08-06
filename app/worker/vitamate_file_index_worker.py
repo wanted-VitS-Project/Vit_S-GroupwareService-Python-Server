@@ -7,7 +7,12 @@ import redis
 from app.service.extractor.extractor_registry import ExtractorRegistry
 from app.service.vitamate_document_chunk_builder import VitamateDocumentChunkBuilder
 from app.service.vitamate_file_downloader import VitamateFileDownloader
-from app.client.dto import VitamateFileIndexCallbackRequest
+from app.client.dto import (
+    VitamateChunkEmbeddingRequest,
+    VitamateChunkEmbeddingSaveRequest,
+    VitamateFileIndexCallbackRequest,
+    VitamateFileIndexCallbackResponse,
+)
 from app.client.spring_vitamate_client import SpringVitamateClient
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
@@ -81,12 +86,15 @@ class VitamateFileIndexRedisWorker:
             message.retry_count,
         )
 
+        index_attempt_id: str | None = None
+
         try:
-            self._send_callback(message.file_version_id, "PROCESSING", None)
+            processing_response = self._send_callback(message.file_version_id, "PROCESSING", None)
+            index_attempt_id = processing_response.index_attempt_id
 
-            self._process_file_index(message.file_version_id)
+            index_attempt_id = self._process_file_index(message.file_version_id)
 
-            self._send_callback(message.file_version_id, "COMPLETED", None)
+            self._send_callback(message.file_version_id, "COMPLETED", None, index_attempt_id)
 
         except SpringVitamateAuthError:
             logger.exception(
@@ -122,7 +130,7 @@ class VitamateFileIndexRedisWorker:
                 message.file_version_id,
             )
 
-            if self._try_failed_callback(message.file_version_id):
+            if self._try_failed_callback(message.file_version_id, index_attempt_id):
                 self._ack(message_id)
             return
 
@@ -132,8 +140,8 @@ class VitamateFileIndexRedisWorker:
         )
         self._ack(message_id)
 
-    def _process_file_index(self, file_version_id: int) -> None:
-        # Spring에서 파일 정보를 조회하고, 파일 텍스트를 chunk로 저장합니다.
+    def _process_file_index(self, file_version_id: int) -> str:
+        # Spring에서 파일 정보를 조회하고, 파일 텍스트를 chunk와 임베딩 결과로 저장합니다.
         source = self._spring_client.get_file_index_source(file_version_id)
 
         with self._file_downloader.download(source) as file_path:
@@ -159,10 +167,37 @@ class VitamateFileIndexRedisWorker:
         )
 
         logger.info(
-            "Vitamate document chunks saved fileVersionId=%s savedChunkCount=%s",
+            "Vitamate document chunks saved fileVersionId=%s indexAttemptId=%s savedChunkCount=%s",
             response.file_version_id,
+            response.index_attempt_id,
             response.saved_chunk_count,
         )
+
+        embedding_request = VitamateChunkEmbeddingSaveRequest(
+            embeddingModel="local-placeholder",
+            indexAttemptId=response.index_attempt_id,
+            chunks=[
+                VitamateChunkEmbeddingRequest(
+                    documentChunkId=chunk.document_chunk_id,
+                    chromaId=f"vitamate:document-chunk:{chunk.document_chunk_id}",
+                )
+                for chunk in response.saved_chunks
+            ],
+        )
+
+        self._spring_client.save_chunk_embeddings(
+            file_version_id=file_version_id,
+            request=embedding_request,
+        )
+
+        logger.info(
+            "Vitamate document chunk embeddings saved fileVersionId=%s indexAttemptId=%s chunkCount=%s",
+            response.file_version_id,
+            response.index_attempt_id,
+            len(response.saved_chunks),
+        )
+
+        return response.index_attempt_id
 
     def _replace_temporary_section_title(
         self,
@@ -183,32 +218,45 @@ class VitamateFileIndexRedisWorker:
         file_version_id: int,
         index_status: str,
         error_message: str | None,
-    ) -> None:
+        index_attempt_id: str | None = None,
+    ) -> VitamateFileIndexCallbackResponse:
         # 파일 인덱싱 상태를 Spring에 전달합니다.
         response = self._spring_client.send_file_index_callback(
             file_version_id=file_version_id,
             callback=VitamateFileIndexCallbackRequest(
                 indexStatus=index_status,
+                indexAttemptId=index_attempt_id,
                 errorMessage=error_message,
             ),
         )
 
         logger.info(
-            "Vitamate file index callback completed fileVersionId=%s accepted=%s status=%s",
+            "Vitamate file index callback completed fileVersionId=%s indexAttemptId=%s accepted=%s status=%s",
             response.file_version_id,
+            response.index_attempt_id,
             response.accepted,
             response.index_status,
         )
 
-    def _try_failed_callback(self, file_version_id: int) -> bool:
+        return response
+
+    def _try_failed_callback(self, file_version_id: int, index_attempt_id: str | None) -> bool:
         # 처리 실패 상태를 Spring에 저장해 인덱싱 상태가 멈추지 않게 합니다.
+        if not index_attempt_id:
+            logger.warning(
+                "Vitamate file index failed before indexAttemptId was issued fileVersionId=%s",
+                file_version_id,
+            )
+            return True
+
         try:
-            self._send_callback(file_version_id, "FAILED", "File indexing failed")
+            self._send_callback(file_version_id, "FAILED", "File indexing failed", index_attempt_id)
             return True
         except Exception:
             logger.exception(
-                "Vitamate file index failed callback rejected fileVersionId=%s",
+                "Vitamate file index failed callback rejected fileVersionId=%s indexAttemptId=%s",
                 file_version_id,
+                index_attempt_id,
             )
             return False
 

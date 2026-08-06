@@ -5,11 +5,14 @@ from unittest.mock import Mock
 import pytest
 
 from app.client.dto import (
+    VitamateChunkEmbeddingRequest,
+    VitamateChunkEmbeddingSaveRequest,
     VitamateDocumentChunkRequest,
     VitamateDocumentChunkSaveRequest,
     VitamateDocumentChunkSaveResponse,
     VitamateFileIndexCallbackResponse,
     VitamateFileIndexSourceResponse,
+    VitamateSavedDocumentChunk,
 )
 from app.core.exceptions import (
     SpringVitamateJobNotFoundError,
@@ -21,11 +24,13 @@ from app.worker.vitamate_file_index_worker import VitamateFileIndexRedisWorker
 
 FILE_VERSION_ID = 900001
 MESSAGE_ID = "file-index-message-1"
+INDEX_ATTEMPT_ID = "550e8400-e29b-41d4-a716-446655440000"
 
 
 def test_handle_message_sends_processing_and_completed_callbacks_then_acks():
     worker, spring_client, ack = _worker_with_fakes()
     spring_client.send_file_index_callback.return_value = _response("COMPLETED")
+    worker._process_file_index.return_value = INDEX_ATTEMPT_ID
 
     worker._handle_message(MESSAGE_ID, _raw_payload())
 
@@ -34,16 +39,14 @@ def test_handle_message_sends_processing_and_completed_callbacks_then_acks():
         for call in spring_client.send_file_index_callback.call_args_list
     ]
     assert sent_statuses == ["PROCESSING", "COMPLETED"]
+    assert spring_client.send_file_index_callback.call_args_list[1].kwargs["callback"].index_attempt_id == INDEX_ATTEMPT_ID
     ack.assert_called_once_with(MESSAGE_ID)
 
 
 def test_handle_message_sends_failed_callback_when_processing_crashes_then_acks():
     worker, spring_client, ack = _worker_with_fakes()
-    spring_client.send_file_index_callback.side_effect = [
-        _response("PROCESSING"),
-        RuntimeError("indexing failed"),
-        _response("FAILED"),
-    ]
+    spring_client.send_file_index_callback.side_effect = [_response("PROCESSING"), _response("FAILED")]
+    worker._process_file_index.side_effect = RuntimeError("indexing failed")
 
     worker._handle_message(MESSAGE_ID, _raw_payload())
 
@@ -51,7 +54,8 @@ def test_handle_message_sends_failed_callback_when_processing_crashes_then_acks(
         call.kwargs["callback"].index_status
         for call in spring_client.send_file_index_callback.call_args_list
     ]
-    assert sent_statuses == ["PROCESSING", "COMPLETED", "FAILED"]
+    assert sent_statuses == ["PROCESSING", "FAILED"]
+    assert spring_client.send_file_index_callback.call_args_list[1].kwargs["callback"].index_attempt_id == INDEX_ATTEMPT_ID
     ack.assert_called_once_with(MESSAGE_ID)
 
 
@@ -104,11 +108,20 @@ def test_process_file_index_downloads_extracts_builds_and_saves_chunks():
     chunk_builder.build.return_value = chunk_request
     spring_client.save_document_chunks.return_value = VitamateDocumentChunkSaveResponse(
         fileVersionId=FILE_VERSION_ID,
+        indexAttemptId=INDEX_ATTEMPT_ID,
         savedChunkCount=1,
+        savedChunks=[
+            VitamateSavedDocumentChunk(
+                documentChunkId=990001,
+                chunkIndex=0,
+                embeddingStatus="PENDING",
+            )
+        ],
     )
 
-    worker._process_file_index(FILE_VERSION_ID)
+    index_attempt_id = worker._process_file_index(FILE_VERSION_ID)
 
+    assert index_attempt_id == INDEX_ATTEMPT_ID
     spring_client.get_file_index_source.assert_called_once_with(FILE_VERSION_ID)
     downloader.download.assert_called_once_with(source)
     extractor_registry.extract.assert_called_once_with(
@@ -120,6 +133,19 @@ def test_process_file_index_downloads_extracts_builds_and_saves_chunks():
     spring_client.save_document_chunks.assert_called_once_with(
         file_version_id=FILE_VERSION_ID,
         request=chunk_request,
+    )
+    spring_client.save_chunk_embeddings.assert_called_once_with(
+        file_version_id=FILE_VERSION_ID,
+        request=VitamateChunkEmbeddingSaveRequest(
+            embeddingModel="local-placeholder",
+            indexAttemptId=INDEX_ATTEMPT_ID,
+            chunks=[
+                VitamateChunkEmbeddingRequest(
+                    documentChunkId=990001,
+                    chromaId="vitamate:document-chunk:990001",
+                )
+            ],
+        ),
     )
 
 
@@ -214,6 +240,7 @@ def _response(index_status: str) -> VitamateFileIndexCallbackResponse:
     return VitamateFileIndexCallbackResponse(
         accepted=True,
         fileVersionId=FILE_VERSION_ID,
+        indexAttemptId=INDEX_ATTEMPT_ID,
         indexStatus=index_status,
         reason=None,
     )

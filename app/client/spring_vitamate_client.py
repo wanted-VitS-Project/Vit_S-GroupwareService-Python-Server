@@ -4,6 +4,7 @@ from app.client.dto import (
     VitamateAnalysisJob,
     VitamateCallbackRequest,
     VitamateCallbackResponse,
+    VitamateChunkEmbeddingSaveRequest,
     VitamateDocumentChunkSaveRequest,
     VitamateDocumentChunkSaveResponse,
     VitamateFileIndexCallbackRequest,
@@ -101,6 +102,23 @@ class SpringVitamateClient:
 
         self._raise_for_response(response)
         return VitamateDocumentChunkSaveResponse.model_validate(response.json())
+
+    def save_chunk_embeddings(
+        self,
+        file_version_id: int,
+        request: VitamateChunkEmbeddingSaveRequest,
+    ) -> None:
+        # ChromaDB 저장 결과를 Spring document_chunk에 반영합니다.
+        url = f"{self._base_url}/internal/v1/vitamate/file-versions/{file_version_id}/chunks/embeddings"
+
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.post(
+                url,
+                headers=self._headers(),
+                json=request.model_dump(by_alias=True),
+            )
+
+        self._raise_for_response(response)
 
     def _headers(self) -> dict[str, str]:
         # 내부 API 인증용 worker token 헤더를 구성합니다.
