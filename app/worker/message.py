@@ -13,3 +13,14 @@ class VitamateAnalysisJobMessage(BaseModel):
     model_config = {
         "populate_by_name": True,
     }
+
+
+class VitamateFileIndexJobMessage(BaseModel):
+    # Redis Stream에서 받은 파일 인덱싱 작업 메시지입니다.
+    file_version_id: int = Field(alias="fileVersionId")
+    retry_count: int = Field(default=0, alias="retryCount")
+    created_at: datetime | None = Field(default=None, alias="createdAt")
+
+    model_config = {
+        "populate_by_name": True,
+    }

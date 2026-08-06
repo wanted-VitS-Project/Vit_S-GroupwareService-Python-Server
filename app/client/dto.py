@@ -60,3 +60,20 @@ class VitamateCallbackResponse(BaseModel):
     analysis_id: int = Field(alias="analysisId")
     analysis_status: str = Field(alias="analysisStatus")
     reason: str | None = None
+
+class VitamateFileIndexCallbackRequest(BaseModel):
+    # Spring file_index callback API로 보낼 인덱싱 상태 변경 요청입니다.
+    index_status: str = Field(alias="indexStatus")
+    error_message: str | None = Field(default=None, alias="errorMessage")
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class VitamateFileIndexCallbackResponse(BaseModel):
+    # Spring file_index callback API 응답입니다.
+    accepted: bool
+    file_version_id: int = Field(alias="fileVersionId")
+    index_status: str = Field(alias="indexStatus")
+    reason: str | None = None

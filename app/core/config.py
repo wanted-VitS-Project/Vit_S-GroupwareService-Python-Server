@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     vitamate_stream_key: str = "vitamate:analysis:jobs"
     vitamate_consumer_group: str = "vitamate-python-workers"
     vitamate_consumer_name: str = "vitamate-worker-local"
+    vitamate_file_index_stream_key: str = "vitamate:file-index:jobs"
+    vitamate_file_index_consumer_group: str = "vitamate-file-index-workers"
+    vitamate_file_index_consumer_name: str = "vitamate-file-index-worker-local"
 
     model_config = SettingsConfigDict(
         env_file=".env",
