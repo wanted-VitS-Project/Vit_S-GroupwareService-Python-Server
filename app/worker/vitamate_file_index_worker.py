@@ -1,9 +1,12 @@
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 import redis
-
+from app.service.extractor.extractor_registry import ExtractorRegistry
+from app.service.vitamate_document_chunk_builder import VitamateDocumentChunkBuilder
+from app.service.vitamate_file_downloader import VitamateFileDownloader
 from app.client.dto import VitamateFileIndexCallbackRequest
 from app.client.spring_vitamate_client import SpringVitamateClient
 from app.core.config import Settings, get_settings
@@ -13,6 +16,7 @@ from app.core.exceptions import (
     SpringVitamateJobNotFoundError,
     SpringVitamateTemporaryError,
 )
+from app.service.extractor.document_text_extractor import ExtractedTextPage
 from app.worker.message import VitamateFileIndexJobMessage
 
 logger = logging.getLogger(__name__)
@@ -25,6 +29,9 @@ class VitamateFileIndexRedisWorker:
         self._settings = settings
         self._redis = redis.Redis.from_url(settings.redis_url, decode_responses=True)
         self._spring_client = SpringVitamateClient(settings)
+        self._file_downloader = VitamateFileDownloader()
+        self._extractor_registry = ExtractorRegistry()
+        self._chunk_builder = VitamateDocumentChunkBuilder()
 
     def run_forever(self) -> None:
         # worker를 계속 실행하며 파일 인덱싱 메시지를 소비합니다.
@@ -77,7 +84,8 @@ class VitamateFileIndexRedisWorker:
         try:
             self._send_callback(message.file_version_id, "PROCESSING", None)
 
-            # TODO: 실제 파일 다운로드, 텍스트 추출, chunk 저장은 다음 단계에서 구현합니다.
+            self._process_file_index(message.file_version_id)
+
             self._send_callback(message.file_version_id, "COMPLETED", None)
 
         except SpringVitamateAuthError:
@@ -124,6 +132,52 @@ class VitamateFileIndexRedisWorker:
         )
         self._ack(message_id)
 
+    def _process_file_index(self, file_version_id: int) -> None:
+        # Spring에서 파일 정보를 조회하고, 파일 텍스트를 chunk로 저장합니다.
+        source = self._spring_client.get_file_index_source(file_version_id)
+
+        with self._file_downloader.download(source) as file_path:
+            pages = self._extractor_registry.extract(
+                file_path=file_path,
+                extension=source.extension,
+                mime_type=source.mime_type,
+            )
+            pages = self._replace_temporary_section_title(
+                pages=pages,
+                temporary_file_name=file_path.name,
+                original_file_name=source.original_file_name,
+            )
+
+        chunk_request = self._chunk_builder.build(pages)
+
+        if not chunk_request.chunks:
+            raise ValueError("No extractable text chunks")
+
+        response = self._spring_client.save_document_chunks(
+            file_version_id=file_version_id,
+            request=chunk_request,
+        )
+
+        logger.info(
+            "Vitamate document chunks saved fileVersionId=%s savedChunkCount=%s",
+            response.file_version_id,
+            response.saved_chunk_count,
+        )
+
+    def _replace_temporary_section_title(
+        self,
+        pages: list[ExtractedTextPage],
+        temporary_file_name: str,
+        original_file_name: str,
+    ) -> list[ExtractedTextPage]:
+        # 임시 파일명이 DB에 남지 않도록 원본 파일명으로 보정합니다.
+        return [
+            replace(page, section_title=original_file_name)
+            if page.section_title == temporary_file_name
+            else page
+            for page in pages
+        ]
+    
     def _send_callback(
         self,
         file_version_id: int,

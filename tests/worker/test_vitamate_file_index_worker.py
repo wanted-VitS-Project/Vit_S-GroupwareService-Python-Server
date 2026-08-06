@@ -1,10 +1,21 @@
+from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import Mock
 
-from app.client.dto import VitamateFileIndexCallbackResponse
+import pytest
+
+from app.client.dto import (
+    VitamateDocumentChunkRequest,
+    VitamateDocumentChunkSaveRequest,
+    VitamateDocumentChunkSaveResponse,
+    VitamateFileIndexCallbackResponse,
+    VitamateFileIndexSourceResponse,
+)
 from app.core.exceptions import (
     SpringVitamateJobNotFoundError,
     SpringVitamateTemporaryError,
 )
+from app.service.extractor.document_text_extractor import ExtractedTextPage
 from app.worker.vitamate_file_index_worker import VitamateFileIndexRedisWorker
 
 
@@ -70,16 +81,126 @@ def test_handle_message_acks_invalid_message():
     ack.assert_called_once_with(MESSAGE_ID)
 
 
+def test_process_file_index_downloads_extracts_builds_and_saves_chunks():
+    worker, spring_client, downloader, extractor_registry, chunk_builder = _worker_for_process_file_index()
+    source = _index_source()
+    downloaded_file = Path("rfp.pdf")
+    extracted_pages = [
+        ExtractedTextPage(
+            page_number=1,
+            section_title="page-1",
+            text="핵심 요구사항과 위험 요소입니다.",
+        )
+    ]
+    chunk_request = _chunk_save_request()
+
+    spring_client.get_file_index_source.return_value = source
+    downloader.download.side_effect = lambda actual_source: _downloaded_file(
+        actual_source,
+        source,
+        downloaded_file,
+    )
+    extractor_registry.extract.return_value = extracted_pages
+    chunk_builder.build.return_value = chunk_request
+    spring_client.save_document_chunks.return_value = VitamateDocumentChunkSaveResponse(
+        fileVersionId=FILE_VERSION_ID,
+        savedChunkCount=1,
+    )
+
+    worker._process_file_index(FILE_VERSION_ID)
+
+    spring_client.get_file_index_source.assert_called_once_with(FILE_VERSION_ID)
+    downloader.download.assert_called_once_with(source)
+    extractor_registry.extract.assert_called_once_with(
+        file_path=downloaded_file,
+        extension="pdf",
+        mime_type="application/pdf",
+    )
+    chunk_builder.build.assert_called_once_with(extracted_pages)
+    spring_client.save_document_chunks.assert_called_once_with(
+        file_version_id=FILE_VERSION_ID,
+        request=chunk_request,
+    )
+
+
+def test_process_file_index_rejects_empty_chunks():
+    worker, spring_client, downloader, extractor_registry, chunk_builder = _worker_for_process_file_index()
+    source = _index_source()
+    downloaded_file = Path("empty.pdf")
+
+    spring_client.get_file_index_source.return_value = source
+    downloader.download.side_effect = lambda actual_source: _downloaded_file(
+        actual_source,
+        source,
+        downloaded_file,
+    )
+    extractor_registry.extract.return_value = []
+    chunk_builder.build.return_value = VitamateDocumentChunkSaveRequest(chunks=[])
+
+    with pytest.raises(ValueError, match="No extractable text chunks"):
+        worker._process_file_index(FILE_VERSION_ID)
+
+    spring_client.save_document_chunks.assert_not_called()
+
+
+def test_replace_temporary_section_title_uses_original_file_name():
+    worker = VitamateFileIndexRedisWorker.__new__(VitamateFileIndexRedisWorker)
+    pages = [
+        ExtractedTextPage(
+            page_number=1,
+            section_title="tmpabc123.csv",
+            text="테스트 문서 본문",
+        ),
+        ExtractedTextPage(
+            page_number=2,
+            section_title="Sheet1",
+            text="엑셀 시트 본문",
+        ),
+    ]
+
+    replaced = worker._replace_temporary_section_title(
+        pages=pages,
+        temporary_file_name="tmpabc123.csv",
+        original_file_name="vitamate-test-900001.csv",
+    )
+
+    assert replaced[0].section_title == "vitamate-test-900001.csv"
+    assert replaced[1].section_title == "Sheet1"
+
+
 def _worker_with_fakes():
     # Redis 연결 없이 파일 인덱싱 worker 처리 흐름만 검증합니다.
     worker = VitamateFileIndexRedisWorker.__new__(VitamateFileIndexRedisWorker)
     spring_client = Mock()
     ack = Mock()
-
+    worker._process_file_index = Mock()
     worker._spring_client = spring_client
     worker._ack = ack
 
     return worker, spring_client, ack
+
+
+def _worker_for_process_file_index():
+    # Redis 없이 실제 파일 인덱싱 처리 흐름의 협력 객체 호출 순서를 검증합니다.
+    worker = VitamateFileIndexRedisWorker.__new__(VitamateFileIndexRedisWorker)
+    spring_client = Mock()
+    downloader = Mock()
+    extractor_registry = Mock()
+    chunk_builder = Mock()
+
+    worker._spring_client = spring_client
+    worker._file_downloader = downloader
+    worker._extractor_registry = extractor_registry
+    worker._chunk_builder = chunk_builder
+
+    return worker, spring_client, downloader, extractor_registry, chunk_builder
+
+
+@contextmanager
+def _downloaded_file(actual_source, expected_source, downloaded_file):
+    # downloader context manager가 넘겨주는 임시 파일 경로를 테스트용으로 대체합니다.
+    assert actual_source == expected_source
+    yield downloaded_file
 
 
 def _raw_payload() -> dict[str, object]:
@@ -95,4 +216,34 @@ def _response(index_status: str) -> VitamateFileIndexCallbackResponse:
         fileVersionId=FILE_VERSION_ID,
         indexStatus=index_status,
         reason=None,
+    )
+
+
+def _index_source() -> VitamateFileIndexSourceResponse:
+    return VitamateFileIndexSourceResponse(
+        fileVersionId=FILE_VERSION_ID,
+        fileId=900001,
+        projectId=900001,
+        originalFileName="rfp.pdf",
+        extension="pdf",
+        mimeType="application/pdf",
+        sizeBytes=1024,
+        storageKey="local/test/rfp.pdf",
+        downloadUrl="https://example.test/rfp.pdf",
+    )
+
+
+def _chunk_save_request() -> VitamateDocumentChunkSaveRequest:
+    return VitamateDocumentChunkSaveRequest(
+        chunks=[
+            VitamateDocumentChunkRequest(
+                chunkIndex=0,
+                pageNumber=1,
+                sectionTitle="page-1",
+                startOffset=0,
+                endOffset=20,
+                tokenCount=7,
+                excerpt="핵심 요구사항과 위험 요소입니다.",
+            )
+        ]
     )

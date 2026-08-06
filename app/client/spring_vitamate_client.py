@@ -4,8 +4,11 @@ from app.client.dto import (
     VitamateAnalysisJob,
     VitamateCallbackRequest,
     VitamateCallbackResponse,
+    VitamateDocumentChunkSaveRequest,
+    VitamateDocumentChunkSaveResponse,
     VitamateFileIndexCallbackRequest,
     VitamateFileIndexCallbackResponse,
+    VitamateFileIndexSourceResponse,
 )
 from app.core.config import Settings
 from app.core.exceptions import (
@@ -70,6 +73,34 @@ class SpringVitamateClient:
 
         self._raise_for_response(response)
         return VitamateFileIndexCallbackResponse.model_validate(response.json())
+
+    def get_file_index_source(self, file_version_id: int) -> VitamateFileIndexSourceResponse:
+        # Python worker가 인덱싱할 파일의 다운로드 URL과 메타데이터를 조회합니다.
+        url = f"{self._base_url}/internal/v1/vitamate/file-versions/{file_version_id}/index-source"
+
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.get(url, headers=self._headers())
+
+        self._raise_for_response(response)
+        return VitamateFileIndexSourceResponse.model_validate(response.json())
+
+    def save_document_chunks(
+        self,
+        file_version_id: int,
+        request: VitamateDocumentChunkSaveRequest,
+    ) -> VitamateDocumentChunkSaveResponse:
+        # 추출한 문서 chunk 목록을 Spring document_chunk 저장 API로 전달합니다.
+        url = f"{self._base_url}/internal/v1/vitamate/file-versions/{file_version_id}/chunks"
+
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.post(
+                url,
+                headers=self._headers(),
+                json=request.model_dump(by_alias=True),
+            )
+
+        self._raise_for_response(response)
+        return VitamateDocumentChunkSaveResponse.model_validate(response.json())
 
     def _headers(self) -> dict[str, str]:
         # 내부 API 인증용 worker token 헤더를 구성합니다.

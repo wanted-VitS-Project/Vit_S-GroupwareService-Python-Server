@@ -77,3 +77,45 @@ class VitamateFileIndexCallbackResponse(BaseModel):
     file_version_id: int = Field(alias="fileVersionId")
     index_status: str = Field(alias="indexStatus")
     reason: str | None = None
+    
+class VitamateFileIndexSourceResponse(BaseModel):
+    # Spring에서 받은 파일 인덱싱 대상 파일 정보입니다.
+    file_version_id: int = Field(alias="fileVersionId")
+    file_id: int = Field(alias="fileId")
+    project_id: int = Field(alias="projectId")
+    original_file_name: str = Field(alias="originalFileName")
+    extension: str
+    mime_type: str | None = Field(default=None, alias="mimeType")
+    size_bytes: int | None = Field(default=None, alias="sizeBytes")
+    storage_key: str = Field(alias="storageKey")
+    download_url: str = Field(alias="downloadUrl")
+
+
+class VitamateDocumentChunkRequest(BaseModel):
+    # Spring document_chunk 테이블에 저장할 chunk 한 건입니다.
+    chunk_index: int = Field(alias="chunkIndex")
+    page_number: int | None = Field(default=None, alias="pageNumber")
+    section_title: str | None = Field(default=None, alias="sectionTitle")
+    start_offset: int | None = Field(default=None, alias="startOffset")
+    end_offset: int | None = Field(default=None, alias="endOffset")
+    token_count: int | None = Field(default=None, alias="tokenCount")
+    excerpt: str
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class VitamateDocumentChunkSaveRequest(BaseModel):
+    # Spring chunk 저장 API로 보낼 요청입니다.
+    chunks: list[VitamateDocumentChunkRequest]
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class VitamateDocumentChunkSaveResponse(BaseModel):
+    # Spring chunk 저장 API 응답입니다.
+    file_version_id: int = Field(alias="fileVersionId")
+    saved_chunk_count: int = Field(alias="savedChunkCount")
