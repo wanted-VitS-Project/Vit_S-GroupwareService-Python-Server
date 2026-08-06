@@ -4,9 +4,9 @@ from app.client.dto import (
     VitamateAnalysisJob,
     VitamateCallbackRequest,
     VitamateCallbackResponse,
-    VitamateChunkEmbeddingSaveRequest,
     VitamateDocumentChunkSaveRequest,
     VitamateDocumentChunkSaveResponse,
+    VitamateChunkEmbeddingSaveRequest,
     VitamateFileIndexCallbackRequest,
     VitamateFileIndexCallbackResponse,
     VitamateFileIndexSourceResponse,
@@ -21,8 +21,9 @@ from app.core.exceptions import (
 )
 
 
+
 class SpringVitamateClient:
-    # Spring Boot 내부 Vitamate API를 호출하는 동기 client입니다.
+    # Spring Boot 내부 Vitamate API를 호출하는 동기 client
 
     def __init__(self, settings: Settings):
         self._base_url = settings.spring_base_url.rstrip("/")
@@ -30,7 +31,7 @@ class SpringVitamateClient:
         self._timeout = 10.0
 
     def get_analysis_job(self, analysis_id: int, attempt_id: str) -> VitamateAnalysisJob:
-        # Python worker가 처리할 분석 입력 데이터를 Spring에서 조회합니다.
+        # Python worker가 처리할 분석 입력 데이터를 조회한다.
         url = f"{self._base_url}/internal/v1/vitamate/analyses/{analysis_id}/jobs/{attempt_id}"
 
         with httpx.Client(timeout=self._timeout) as client:
@@ -44,7 +45,7 @@ class SpringVitamateClient:
         analysis_id: int,
         callback: VitamateCallbackRequest,
     ) -> VitamateCallbackResponse:
-        # AI 분석 결과를 Spring Boot callback API로 전달합니다.
+        # AI 분석 결과를 Spring Boot callback API로 전달한다.
         url = f"{self._base_url}/internal/v1/vitamate/analyses/{analysis_id}/callback"
 
         with httpx.Client(timeout=self._timeout) as client:
@@ -57,24 +58,35 @@ class SpringVitamateClient:
         self._raise_for_response(response)
         return VitamateCallbackResponse.model_validate(response.json())
 
-    def send_file_index_callback(
-        self,
-        file_version_id: int,
-        callback: VitamateFileIndexCallbackRequest,
-    ) -> VitamateFileIndexCallbackResponse:
-        # 파일 인덱싱 상태를 Spring Boot file_index callback API로 전달합니다.
-        url = f"{self._base_url}/internal/v1/vitamate/file-indexes/{file_version_id}/callback"
+    def _headers(self) -> dict[str, str]:
+        # 내부 API 인증용 worker token 헤더를 구성한다.
+        return {
+            "X-Vitamate-Worker-Token": self._worker_token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
 
-        with httpx.Client(timeout=self._timeout) as client:
-            response = client.post(
-                url,
-                headers=self._headers(),
-                json=callback.model_dump(by_alias=True),
-            )
+    def _raise_for_response(self, response: httpx.Response) -> None:
+        # Spring 응답 상태를 worker 처리 정책에 맞는 예외로 변환한다.
+        if response.status_code < 400:
+            return
 
-        self._raise_for_response(response)
-        return VitamateFileIndexCallbackResponse.model_validate(response.json())
+        if response.status_code in (401, 403):
+            raise SpringVitamateAuthError("Spring worker authentication failed")
 
+        if response.status_code == 400:
+            raise SpringVitamateBadRequestError("Spring rejected worker request")
+
+        if response.status_code == 404:
+            raise SpringVitamateJobNotFoundError("Spring analysis job was not found")
+
+        if response.status_code >= 500:
+            raise SpringVitamateTemporaryError("Spring internal API temporary failure")
+
+        raise SpringVitamateClientError(
+            f"Unexpected Spring response status: {response.status_code}"
+        )
+        
     def get_file_index_source(self, file_version_id: int) -> VitamateFileIndexSourceResponse:
         # Python worker가 인덱싱할 파일의 다운로드 URL과 메타데이터를 조회합니다.
         url = f"{self._base_url}/internal/v1/vitamate/file-versions/{file_version_id}/index-source"
@@ -102,7 +114,7 @@ class SpringVitamateClient:
 
         self._raise_for_response(response)
         return VitamateDocumentChunkSaveResponse.model_validate(response.json())
-
+    
     def save_chunk_embeddings(
         self,
         file_version_id: int,
@@ -118,33 +130,23 @@ class SpringVitamateClient:
                 json=request.model_dump(by_alias=True),
             )
 
-        self._raise_for_response(response)
+        self._raise_for_response(response)  
+        
+        
+    def send_file_index_callback(
+        self,
+        file_version_id: int,
+        callback: VitamateFileIndexCallbackRequest,
+        ) -> VitamateFileIndexCallbackResponse:
+        # 파일 인덱싱 상태를 Spring 내부 callback API로 전달합니다.
+        url = f"{self._base_url}/internal/v1/vitamate/file-indexes/{file_version_id}/callback"
 
-    def _headers(self) -> dict[str, str]:
-        # 내부 API 인증용 worker token 헤더를 구성합니다.
-        return {
-            "X-Vitamate-Worker-Token": self._worker_token,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
-    def _raise_for_response(self, response: httpx.Response) -> None:
-        # Spring 응답 상태를 worker 처리 정책에 맞는 예외로 변환합니다.
-        if response.status_code < 400:
-            return
-
-        if response.status_code in (401, 403):
-            raise SpringVitamateAuthError("Spring worker authentication failed")
-
-        if response.status_code == 400:
-            raise SpringVitamateBadRequestError("Spring rejected worker request")
-
-        if response.status_code == 404:
-            raise SpringVitamateJobNotFoundError("Spring resource was not found")
-
-        if response.status_code >= 500:
-            raise SpringVitamateTemporaryError("Spring internal API temporary failure")
-
-        raise SpringVitamateClientError(
-            f"Unexpected Spring response status: {response.status_code}"
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.post(
+            url,
+            headers=self._headers(),
+            json=callback.model_dump(by_alias=True),
         )
+
+        self._raise_for_response(response)
+        return VitamateFileIndexCallbackResponse.model_validate(response.json())

@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import time
 from dataclasses import replace
 from typing import Any
@@ -8,8 +8,6 @@ from app.service.extractor.extractor_registry import ExtractorRegistry
 from app.service.vitamate_document_chunk_builder import VitamateDocumentChunkBuilder
 from app.service.vitamate_file_downloader import VitamateFileDownloader
 from app.client.dto import (
-    VitamateChunkEmbeddingRequest,
-    VitamateChunkEmbeddingSaveRequest,
     VitamateFileIndexCallbackRequest,
     VitamateFileIndexCallbackResponse,
 )
@@ -22,13 +20,14 @@ from app.core.exceptions import (
     SpringVitamateTemporaryError,
 )
 from app.service.extractor.document_text_extractor import ExtractedTextPage
+from app.service.vitamate_chunk_embedding_service import VitamateChunkEmbeddingService
 from app.worker.message import VitamateFileIndexJobMessage
 
 logger = logging.getLogger(__name__)
 
 
 class VitamateFileIndexRedisWorker:
-    # Redis Stream에서 파일 인덱싱 작업을 받아 Spring file_index 상태를 갱신합니다.
+    # Redis Stream?먯꽌 ?뚯씪 ?몃뜳???묒뾽??諛쏆븘 Spring file_index ?곹깭瑜?媛깆떊?⑸땲??
 
     def __init__(self, settings: Settings):
         self._settings = settings
@@ -37,9 +36,10 @@ class VitamateFileIndexRedisWorker:
         self._file_downloader = VitamateFileDownloader()
         self._extractor_registry = ExtractorRegistry()
         self._chunk_builder = VitamateDocumentChunkBuilder()
+        self._chunk_embedding_service = VitamateChunkEmbeddingService(settings)
 
     def run_forever(self) -> None:
-        # worker를 계속 실행하며 파일 인덱싱 메시지를 소비합니다.
+        # worker瑜?怨꾩냽 ?ㅽ뻾?섎ŉ ?뚯씪 ?몃뜳??硫붿떆吏瑜??뚮퉬?⑸땲??
         self._ensure_consumer_group()
 
         logger.info(
@@ -53,7 +53,7 @@ class VitamateFileIndexRedisWorker:
             self.consume_once(block_ms=5000)
 
     def consume_once(self, block_ms: int = 5000) -> None:
-        # 파일 인덱싱 메시지를 한 번 읽고 처리합니다.
+        # ?뚯씪 ?몃뜳??硫붿떆吏瑜???踰??쎄퀬 泥섎━?⑸땲??
         self._ensure_consumer_group()
 
         messages = self._redis.xreadgroup(
@@ -72,7 +72,7 @@ class VitamateFileIndexRedisWorker:
                 self._handle_message(message_id, raw_payload)
 
     def _handle_message(self, message_id: str, raw_payload: dict[str, Any]) -> None:
-        # 메시지를 검증하고 PROCESSING, COMPLETED 상태 callback을 전송합니다.
+        # 硫붿떆吏瑜?寃利앺븯怨?PROCESSING, COMPLETED ?곹깭 callback???꾩넚?⑸땲??
         try:
             message = VitamateFileIndexJobMessage.model_validate(raw_payload)
         except Exception:
@@ -141,7 +141,7 @@ class VitamateFileIndexRedisWorker:
         self._ack(message_id)
 
     def _process_file_index(self, file_version_id: int) -> str:
-        # Spring에서 파일 정보를 조회하고, 파일 텍스트를 chunk와 임베딩 결과로 저장합니다.
+        # Spring?먯꽌 ?뚯씪 ?뺣낫瑜?議고쉶?섍퀬, ?뚯씪 ?띿뒪?몃? chunk? ?꾨쿋??寃곌낵濡???ν빀?덈떎.
         source = self._spring_client.get_file_index_source(file_version_id)
 
         with self._file_downloader.download(source) as file_path:
@@ -173,16 +173,11 @@ class VitamateFileIndexRedisWorker:
             response.saved_chunk_count,
         )
 
-        embedding_request = VitamateChunkEmbeddingSaveRequest(
-            embeddingModel="local-placeholder",
-            indexAttemptId=response.index_attempt_id,
-            chunks=[
-                VitamateChunkEmbeddingRequest(
-                    documentChunkId=chunk.document_chunk_id,
-                    chromaId=f"vitamate:document-chunk:{chunk.document_chunk_id}",
-                )
-                for chunk in response.saved_chunks
-            ],
+        embedding_request = self._chunk_embedding_service.embed_and_store(
+            file_version_id=file_version_id,
+            index_attempt_id=response.index_attempt_id,
+            saved_chunks=response.saved_chunks,
+            original_chunks=chunk_request.chunks,
         )
 
         self._spring_client.save_chunk_embeddings(
@@ -205,7 +200,7 @@ class VitamateFileIndexRedisWorker:
         temporary_file_name: str,
         original_file_name: str,
     ) -> list[ExtractedTextPage]:
-        # 임시 파일명이 DB에 남지 않도록 원본 파일명으로 보정합니다.
+        # ?꾩떆 ?뚯씪紐낆씠 DB???⑥? ?딅룄濡??먮낯 ?뚯씪紐낆쑝濡?蹂댁젙?⑸땲??
         return [
             replace(page, section_title=original_file_name)
             if page.section_title == temporary_file_name
@@ -220,7 +215,7 @@ class VitamateFileIndexRedisWorker:
         error_message: str | None,
         index_attempt_id: str | None = None,
     ) -> VitamateFileIndexCallbackResponse:
-        # 파일 인덱싱 상태를 Spring에 전달합니다.
+        # ?뚯씪 ?몃뜳???곹깭瑜?Spring???꾨떖?⑸땲??
         response = self._spring_client.send_file_index_callback(
             file_version_id=file_version_id,
             callback=VitamateFileIndexCallbackRequest(
@@ -241,7 +236,7 @@ class VitamateFileIndexRedisWorker:
         return response
 
     def _try_failed_callback(self, file_version_id: int, index_attempt_id: str | None) -> bool:
-        # 처리 실패 상태를 Spring에 저장해 인덱싱 상태가 멈추지 않게 합니다.
+        # 泥섎━ ?ㅽ뙣 ?곹깭瑜?Spring????ν빐 ?몃뜳???곹깭媛 硫덉텛吏 ?딄쾶 ?⑸땲??
         if not index_attempt_id:
             logger.warning(
                 "Vitamate file index failed before indexAttemptId was issued fileVersionId=%s",
@@ -261,7 +256,7 @@ class VitamateFileIndexRedisWorker:
             return False
 
     def _ensure_consumer_group(self) -> None:
-        # Redis Stream consumer group이 없으면 생성합니다.
+        # Redis Stream consumer group???놁쑝硫??앹꽦?⑸땲??
         try:
             self._redis.xgroup_create(
                 name=self._settings.vitamate_file_index_stream_key,
@@ -274,7 +269,7 @@ class VitamateFileIndexRedisWorker:
                 raise
 
     def _ack(self, message_id: str) -> None:
-        # 처리 완료된 메시지를 Redis Stream에서 ack 처리합니다.
+        # 泥섎━ ?꾨즺??硫붿떆吏瑜?Redis Stream?먯꽌 ack 泥섎━?⑸땲??
         self._redis.xack(
             self._settings.vitamate_file_index_stream_key,
             self._settings.vitamate_file_index_consumer_group,
@@ -283,7 +278,7 @@ class VitamateFileIndexRedisWorker:
 
 
 def main() -> None:
-    # CLI에서 파일 인덱싱 worker를 실행하기 위한 진입점입니다.
+    # CLI?먯꽌 ?뚯씪 ?몃뜳??worker瑜??ㅽ뻾?섍린 ?꾪븳 吏꾩엯?먯엯?덈떎.
     logging.basicConfig(level=logging.INFO)
     worker = VitamateFileIndexRedisWorker(get_settings())
     worker.run_forever()
@@ -291,3 +286,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

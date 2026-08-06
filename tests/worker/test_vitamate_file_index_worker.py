@@ -86,7 +86,7 @@ def test_handle_message_acks_invalid_message():
 
 
 def test_process_file_index_downloads_extracts_builds_and_saves_chunks():
-    worker, spring_client, downloader, extractor_registry, chunk_builder = _worker_for_process_file_index()
+    worker, spring_client, downloader, extractor_registry, chunk_builder, chunk_embedding_service = _worker_for_process_file_index()
     source = _index_source()
     downloaded_file = Path("rfp.pdf")
     extracted_pages = [
@@ -118,6 +118,17 @@ def test_process_file_index_downloads_extracts_builds_and_saves_chunks():
             )
         ],
     )
+    embedding_request = VitamateChunkEmbeddingSaveRequest(
+        embeddingModel="gemini-embedding-001",
+        indexAttemptId=INDEX_ATTEMPT_ID,
+        chunks=[
+            VitamateChunkEmbeddingRequest(
+                documentChunkId=990001,
+                chromaId=f"vitamate:{FILE_VERSION_ID}:990001:{INDEX_ATTEMPT_ID}",
+            )
+        ],
+    )
+    chunk_embedding_service.embed_and_store.return_value = embedding_request
 
     index_attempt_id = worker._process_file_index(FILE_VERSION_ID)
 
@@ -134,23 +145,20 @@ def test_process_file_index_downloads_extracts_builds_and_saves_chunks():
         file_version_id=FILE_VERSION_ID,
         request=chunk_request,
     )
+    chunk_embedding_service.embed_and_store.assert_called_once_with(
+        file_version_id=FILE_VERSION_ID,
+        index_attempt_id=INDEX_ATTEMPT_ID,
+        saved_chunks=spring_client.save_document_chunks.return_value.saved_chunks,
+        original_chunks=chunk_request.chunks,
+    )
     spring_client.save_chunk_embeddings.assert_called_once_with(
         file_version_id=FILE_VERSION_ID,
-        request=VitamateChunkEmbeddingSaveRequest(
-            embeddingModel="local-placeholder",
-            indexAttemptId=INDEX_ATTEMPT_ID,
-            chunks=[
-                VitamateChunkEmbeddingRequest(
-                    documentChunkId=990001,
-                    chromaId="vitamate:document-chunk:990001",
-                )
-            ],
-        ),
+        request=embedding_request,
     )
 
 
 def test_process_file_index_rejects_empty_chunks():
-    worker, spring_client, downloader, extractor_registry, chunk_builder = _worker_for_process_file_index()
+    worker, spring_client, downloader, extractor_registry, chunk_builder, chunk_embedding_service = _worker_for_process_file_index()
     source = _index_source()
     downloaded_file = Path("empty.pdf")
 
@@ -167,6 +175,7 @@ def test_process_file_index_rejects_empty_chunks():
         worker._process_file_index(FILE_VERSION_ID)
 
     spring_client.save_document_chunks.assert_not_called()
+    chunk_embedding_service.embed_and_store.assert_not_called()
 
 
 def test_replace_temporary_section_title_uses_original_file_name():
@@ -213,13 +222,15 @@ def _worker_for_process_file_index():
     downloader = Mock()
     extractor_registry = Mock()
     chunk_builder = Mock()
+    chunk_embedding_service = Mock()
 
     worker._spring_client = spring_client
     worker._file_downloader = downloader
     worker._extractor_registry = extractor_registry
     worker._chunk_builder = chunk_builder
+    worker._chunk_embedding_service = chunk_embedding_service
 
-    return worker, spring_client, downloader, extractor_registry, chunk_builder
+    return worker, spring_client, downloader, extractor_registry, chunk_builder, chunk_embedding_service
 
 
 @contextmanager
