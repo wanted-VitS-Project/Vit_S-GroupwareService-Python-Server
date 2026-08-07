@@ -13,6 +13,7 @@ class VitamateDocument(BaseModel):
     # 분석 대상 파일 버전과 그 안의 청크 목록입니다.
     file_version_id: int = Field(alias="fileVersionId")
     file_name: str = Field(alias="fileName")
+    document_role: str = Field(alias="documentRole")
     chunks: list[VitamateChunk] = Field(default_factory=list)
 
 
@@ -38,7 +39,7 @@ class VitamateAnalysisJob(BaseModel):
     attempt_id: str = Field(alias="attemptId")
     review_type: str = Field(alias="reviewType")
     review_category_codes: list[str] = Field(default_factory=list, alias="reviewCategoryCodes")
-    additional_instruction: str | None = Field(default=None, alias="additionalInstruction")
+    prompt: str
     review_templates: list[VitamateReviewTemplate] = Field(default_factory=list, alias="reviewTemplates")
     search_scope: VitamateSearchScope = Field(alias="searchScope")
     documents: list[VitamateDocument] = Field(default_factory=list)

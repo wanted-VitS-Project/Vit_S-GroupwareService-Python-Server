@@ -92,6 +92,23 @@ def test_handle_message_does_not_ack_when_callback_has_temporary_failure():
     ack.assert_not_called()
 
 
+def test_handle_message_sends_failed_callback_when_job_response_is_invalid_and_acks():
+    # get_analysis_job 응답이 계약과 안 맞아 파싱에 실패해도(예: 필수 필드 누락) worker 전체가
+    # 죽지 않고 FAILED로 확정 후 ack해야 한다. job이 없으므로 message의 id를 그대로 써야 한다.
+    worker, spring_client, _, ack = _worker_with_fakes()
+
+    spring_client.get_analysis_job.side_effect = ValueError("prompt field missing")
+    spring_client.send_callback.return_value = _callback_response("FAILED")
+
+    worker._handle_message(MESSAGE_ID, _raw_payload())
+
+    spring_client.send_callback.assert_called_once_with(
+        analysis_id=ANALYSIS_ID,
+        callback=_callback("FAILED", error_message="분석 작업 조회 응답이 올바르지 않습니다."),
+    )
+    ack.assert_called_once_with(MESSAGE_ID)
+
+
 def test_handle_message_acks_invalid_message():
     worker, _, _, ack = _worker_with_fakes()
 
@@ -128,7 +145,7 @@ def _job() -> VitamateAnalysisJob:
         attemptId=ATTEMPT_ID,
         reviewType="COST_REPORT",
         reviewCategoryCodes=["COST_RESULT"],
-        additionalInstruction="핵심 기술 요구사항과 위험 요소를 정리해줘.",
+        prompt="기준 문서와 비교하여 핵심 기술 요구사항과 위험 요소를 검토해줘.",
         reviewTemplates=[
             {
                 "reviewType": "COST_REPORT",
@@ -147,6 +164,7 @@ def _job() -> VitamateAnalysisJob:
             {
                 "fileVersionId": 900001,
                 "fileName": "제안요청서.pdf",
+                "documentRole": "TARGET",
                 "chunks": [
                     {
                         "documentChunkId": 1,

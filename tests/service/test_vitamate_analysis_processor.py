@@ -30,8 +30,12 @@ def test_analyze_uses_same_selected_chunks_for_prompt_and_citations():
     assert "chunk-1" in gemini_client.last_prompt
     assert "chunk-5" in gemini_client.last_prompt
     assert "chunk-6" not in gemini_client.last_prompt
-    assert [citation.document_chunk_id for citation in callback.citations] == [100, 101, 102]
-    assert [citation.excerpt for citation in callback.citations] == ["chunk-1", "chunk-2", "chunk-3"]
+    assert [citation.document_chunk_id for citation in callback.citations] == [99, 100, 101]
+    assert [citation.excerpt for citation in callback.citations] == [
+        "기준: chunk-1",
+        "chunk-1",
+        "chunk-2",
+    ]
 
 
 def test_analyze_returns_failed_when_no_selectable_chunks():
@@ -66,7 +70,7 @@ def _job(chunks: list[str | None]) -> VitamateAnalysisJob:
         attemptId="attempt-1",
         reviewType="COST_REPORT",
         reviewCategoryCodes=["COST_RESULT"],
-        additionalInstruction="핵심 요구사항을 정리해줘.",
+        prompt="기준 문서와 비교하여 핵심 요구사항을 검토해줘.",
         reviewTemplates=[
             {
                 "reviewType": "COST_REPORT",
@@ -79,12 +83,29 @@ def _job(chunks: list[str | None]) -> VitamateAnalysisJob:
         searchScope={
             "projectId": 1,
             "blockId": 900001,
-            "fileVersionIds": [900001],
+            "fileVersionIds": [900000, 900001],
         },
         documents=[
             {
+                "fileVersionId": 900000,
+                "fileName": "검토기준.pdf",
+                "documentRole": "REFERENCE",
+                "chunks": [
+                    {
+                        "documentChunkId": 99,
+                        "chromaId": "reference-99",
+                        "pageNumber": 1,
+                        "excerpt": next(
+                            (f"기준: {excerpt}" for excerpt in chunks if excerpt and excerpt.strip()),
+                            "",
+                        ),
+                    }
+                ],
+            },
+            {
                 "fileVersionId": 900001,
                 "fileName": "스마트시티_RFP.pdf",
+                "documentRole": "TARGET",
                 "chunks": [
                     {
                         "documentChunkId": 100 + index,

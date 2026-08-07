@@ -31,6 +31,10 @@ class VitamateAnalysisProcessor:
         if not selected_chunks:
             return self._failed(job, "분석 가능한 문서 chunk가 없습니다.")
 
+        selected_roles = {selected.document.document_role for selected in selected_chunks}
+        if not {"REFERENCE", "TARGET"}.issubset(selected_roles):
+            return self._failed(job, "기준 문서와 검토 대상 문서의 chunk가 모두 필요합니다.")
+
         prompt = self._prompt_builder.build_with_selected_chunks(job, selected_chunks)
         citations = self._build_citations(selected_chunks)
 
@@ -54,10 +58,22 @@ class VitamateAnalysisProcessor:
         self,
         selected_chunks: list[SelectedVitamateChunk],
     ) -> list[VitamateCitationCallback]:
-        # Gemini 입력에 사용한 chunk 중 앞 3개만 분석 근거로 저장합니다.
+        # 기준과 대상 문서가 모두 근거에 포함되도록 대표 chunk를 먼저 선택합니다.
         citations: list[VitamateCitationCallback] = []
+        citation_candidates: list[SelectedVitamateChunk] = []
+        for role in ("REFERENCE", "TARGET"):
+            representative = next(
+                (selected for selected in selected_chunks if selected.document.document_role == role),
+                None,
+            )
+            if representative is not None:
+                citation_candidates.append(representative)
 
-        for selected in selected_chunks[:3]:
+        citation_candidates.extend(
+            selected for selected in selected_chunks if selected not in citation_candidates
+        )
+
+        for selected in citation_candidates[:3]:
             citations.append(
                 VitamateCitationCallback(
                     documentChunkId=selected.chunk.document_chunk_id,
@@ -81,7 +97,7 @@ class VitamateAnalysisProcessor:
         return (
             "[LOCAL FALLBACK] Gemini 호출 없이 생성한 테스트 분석 결과입니다.\n\n"
             f"검토 유형: {job.review_type}\n"
-            f"사용자 추가 요청: {job.additional_instruction or '없음'}\n"
+            f"최종 검토 요청: {job.prompt}\n"
             f"분석 대상 문서 수: {len(job.documents)}개\n"
             f"대표 근거: {first_excerpt}"
         )

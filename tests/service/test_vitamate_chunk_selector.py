@@ -68,7 +68,7 @@ def _job(documents: list[dict]) -> VitamateAnalysisJob:
         attemptId="attempt-1",
         reviewType="COST_REPORT",
         reviewCategoryCodes=["COST_RESULT"],
-        additionalInstruction="핵심 요구사항을 정리해줘.",
+        prompt="기준 문서와 비교하여 핵심 요구사항을 검토해줘.",
         reviewTemplates=[
             {
                 "reviewType": "COST_REPORT",
@@ -91,6 +91,7 @@ def _document(file_version_id: int, chunks: list[str]) -> dict:
     return {
         "fileVersionId": file_version_id,
         "fileName": f"document-{file_version_id}.pdf",
+        "documentRole": "TARGET",
         "chunks": [
             {
                 "documentChunkId": file_version_id * 100 + index,

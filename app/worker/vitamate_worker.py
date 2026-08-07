@@ -5,7 +5,7 @@ from typing import Any
 import redis
 
 from app.service.vitamate_analysis_processor import VitamateAnalysisProcessor
-from app.client.dto import VitamateAnalysisJob, VitamateCallbackRequest
+from app.client.dto import VitamateCallbackRequest
 from app.client.spring_vitamate_client import SpringVitamateClient
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
@@ -115,6 +115,19 @@ class VitamateRedisWorker:
             )
             time.sleep(5)
             return
+        except Exception:
+            # 응답 형식이 계약과 안 맞는 경우(필드 누락 등) 포함 — worker 전체가 죽지 않도록 여기서 막는다.
+            # 재시도해도 같은 응답이 다시 올 뿐이므로 FAILED 확정 후 ack한다(poison message 취급).
+            logger.exception(
+                "Vitamate job load response invalid analysisId=%s attemptId=%s",
+                message.analysis_id,
+                message.attempt_id,
+            )
+            if self._send_failed_callback(
+                message.analysis_id, message.attempt_id, "분석 작업 조회 응답이 올바르지 않습니다."
+            ):
+                self._ack(message_id)
+            return
 
         logger.info(
             "Vitamate job loaded analysisId=%s attemptId=%s documentCount=%s",
@@ -143,7 +156,7 @@ class VitamateRedisWorker:
                 message.analysis_id,
                 message.attempt_id,
             )
-            if self._send_failed_callback(job, "AI analysis failed"):
+            if self._send_failed_callback(job.analysis_id, job.attempt_id, "AI analysis failed"):
                 self._ack(message_id)
             return
         except SpringVitamateAuthError:
@@ -168,7 +181,7 @@ class VitamateRedisWorker:
                 message.analysis_id,
                 message.attempt_id,
             )
-            if self._send_failed_callback(job, "AI analysis processing failed"):
+            if self._send_failed_callback(job.analysis_id, job.attempt_id, "AI analysis processing failed"):
                 self._ack(message_id)
             return
 
@@ -184,12 +197,14 @@ class VitamateRedisWorker:
 
     def _send_failed_callback(
         self,
-        job: VitamateAnalysisJob,
+        analysis_id: int,
+        attempt_id: str,
         error_message: str,
     ) -> bool:
         # 분석 실패 상태를 Spring에 저장해 PENDING/PROCESSING 상태가 멈추지 않게 합니다.
+        # job 조회 자체가 실패한 경우에도 호출할 수 있도록 job 전체가 아니라 id만 받는다.
         callback = VitamateCallbackRequest(
-            attemptId=job.attempt_id,
+            attemptId=attempt_id,
             analysisStatus="FAILED",
             result=None,
             citations=[],
@@ -198,37 +213,37 @@ class VitamateRedisWorker:
 
         try:
             callback_response = self._spring_client.send_callback(
-                analysis_id=job.analysis_id,
+                analysis_id=analysis_id,
                 callback=callback,
             )
         except SpringVitamateAuthError:
             logger.exception(
                 "Vitamate failed callback auth failed analysisId=%s attemptId=%s",
-                job.analysis_id,
-                job.attempt_id,
+                analysis_id,
+                attempt_id,
             )
             time.sleep(5)
             return False
         except SpringVitamateTemporaryError:
             logger.exception(
                 "Temporary Spring failed callback failure analysisId=%s attemptId=%s",
-                job.analysis_id,
-                job.attempt_id,
+                analysis_id,
+                attempt_id,
             )
             time.sleep(5)
             return False
         except Exception:
             logger.exception(
                 "Vitamate failed callback rejected analysisId=%s attemptId=%s",
-                job.analysis_id,
-                job.attempt_id,
+                analysis_id,
+                attempt_id,
             )
             return False
 
         logger.warning(
             "Vitamate failed callback completed analysisId=%s attemptId=%s accepted=%s status=%s",
             callback_response.analysis_id,
-            job.attempt_id,
+            attempt_id,
             callback_response.accepted,
             callback_response.analysis_status,
         )
