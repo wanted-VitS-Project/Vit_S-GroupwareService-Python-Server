@@ -126,7 +126,18 @@ def _job() -> VitamateAnalysisJob:
     return VitamateAnalysisJob(
         analysisId=ANALYSIS_ID,
         attemptId=ATTEMPT_ID,
-        prompt="핵심 기술 요구사항과 위험 요소를 정리해줘.",
+        reviewType="COST_REPORT",
+        reviewCategoryCodes=["COST_RESULT"],
+        additionalInstruction="핵심 기술 요구사항과 위험 요소를 정리해줘.",
+        reviewTemplates=[
+            {
+                "reviewType": "COST_REPORT",
+                "categoryCode": "COST_RESULT",
+                "categoryName": "I. 원가계산 결과",
+                "promptTemplate": "원가 총액과 항목별 합계가 일치하는지 검토합니다.",
+                "templateVersion": "COST_REPORT_V1",
+            }
+        ],
         searchScope={
             "projectId": 1,
             "blockId": 900001,
@@ -135,7 +146,7 @@ def _job() -> VitamateAnalysisJob:
         documents=[
             {
                 "fileVersionId": 900001,
-                "fileName": "제안요청서",
+                "fileName": "제안요청서.pdf",
                 "chunks": [
                     {
                         "documentChunkId": 1,

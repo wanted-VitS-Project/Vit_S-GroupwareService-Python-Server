@@ -13,4 +13,5 @@ build/
 .vscode/
 
 # Local ChromaDB data
+chroma/
 chroma-data/

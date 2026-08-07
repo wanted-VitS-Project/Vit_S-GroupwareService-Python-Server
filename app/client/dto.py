@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class VitamateChunk(BaseModel):
-    # AI 분석에 사용할 문서 청크 정보
+    # AI 분석에 사용할 문서 청크 정보입니다.
     document_chunk_id: int = Field(alias="documentChunkId")
     chroma_id: str | None = Field(default=None, alias="chromaId")
     page_number: int | None = Field(default=None, alias="pageNumber")
@@ -10,30 +10,42 @@ class VitamateChunk(BaseModel):
 
 
 class VitamateDocument(BaseModel):
-    # 분석 대상 파일 버전과 그 안의 청크 목록
+    # 분석 대상 파일 버전과 그 안의 청크 목록입니다.
     file_version_id: int = Field(alias="fileVersionId")
     file_name: str = Field(alias="fileName")
     chunks: list[VitamateChunk] = Field(default_factory=list)
 
 
 class VitamateSearchScope(BaseModel):
-    # Spring이 검증해 내려준 분석 검색 범위
+    # Spring이 검증해서 내려준 분석 검색 범위입니다.
     project_id: int = Field(alias="projectId")
     block_id: int = Field(alias="blockId")
     file_version_ids: list[int] = Field(alias="fileVersionIds")
 
 
+class VitamateReviewTemplate(BaseModel):
+    # Spring이 분석 요청 시점에 고정해서 내려주는 검토 템플릿 항목입니다.
+    review_type: str = Field(alias="reviewType")
+    category_code: str = Field(alias="categoryCode")
+    category_name: str = Field(alias="categoryName")
+    prompt_template: str = Field(alias="promptTemplate")
+    template_version: str = Field(alias="templateVersion")
+
+
 class VitamateAnalysisJob(BaseModel):
-    # Python worker가 Spring에서 조회하는 분석 작업 상세
+    # Python worker가 Spring에서 조회하는 분석 작업 상세입니다.
     analysis_id: int = Field(alias="analysisId")
     attempt_id: str = Field(alias="attemptId")
-    prompt: str
+    review_type: str = Field(alias="reviewType")
+    review_category_codes: list[str] = Field(default_factory=list, alias="reviewCategoryCodes")
+    additional_instruction: str | None = Field(default=None, alias="additionalInstruction")
+    review_templates: list[VitamateReviewTemplate] = Field(default_factory=list, alias="reviewTemplates")
     search_scope: VitamateSearchScope = Field(alias="searchScope")
     documents: list[VitamateDocument] = Field(default_factory=list)
 
 
 class VitamateCitationCallback(BaseModel):
-    # 분석 결과의 근거 청크 정보
+    # 분석 결과의 근거 청크 정보입니다.
     document_chunk_id: int = Field(alias="documentChunkId")
     file_version_id: int = Field(alias="fileVersionId")
     rank_order: int = Field(alias="rankOrder")
@@ -42,7 +54,7 @@ class VitamateCitationCallback(BaseModel):
 
 
 class VitamateCallbackRequest(BaseModel):
-    # Spring callback API에 보낼 분석 결과
+    # Spring callback API로 보낼 분석 결과입니다.
     attempt_id: str = Field(alias="attemptId")
     analysis_status: str = Field(alias="analysisStatus")
     result: str | None = None
@@ -55,7 +67,7 @@ class VitamateCallbackRequest(BaseModel):
 
 
 class VitamateCallbackResponse(BaseModel):
-    # Spring callback API 응답
+    # Spring callback API 응답입니다.
     accepted: bool
     analysis_id: int = Field(alias="analysisId")
     analysis_status: str = Field(alias="analysisStatus")

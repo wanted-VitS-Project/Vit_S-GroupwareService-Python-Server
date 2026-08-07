@@ -80,7 +80,8 @@ class VitamateAnalysisProcessor:
 
         return (
             "[LOCAL FALLBACK] Gemini 호출 없이 생성한 테스트 분석 결과입니다.\n\n"
-            f"요청 프롬프트: {job.prompt}\n"
+            f"검토 유형: {job.review_type}\n"
+            f"사용자 추가 요청: {job.additional_instruction or '없음'}\n"
             f"분석 대상 문서 수: {len(job.documents)}개\n"
             f"대표 근거: {first_excerpt}"
         )

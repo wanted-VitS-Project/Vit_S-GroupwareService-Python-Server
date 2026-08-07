@@ -5,7 +5,7 @@ from app.service.vitamate_analysis_processor import VitamateAnalysisProcessor
 
 
 def test_analyze_uses_same_selected_chunks_for_prompt_and_citations():
-    # Gemini에 보낸 chunk와 Spring에 저장할 citation chunk가 같은 선택 정책을 따르는지 검증합니다.
+    # Gemini에 보낸 chunk와 Spring에 저장할 citation chunk가 같은 선택 규칙을 따르는지 검증합니다.
     gemini_client = FakeGeminiClient()
     processor = VitamateAnalysisProcessor(
         settings=SimpleNamespace(vitamate_ai_fallback_enabled=False),
@@ -25,6 +25,8 @@ def test_analyze_uses_same_selected_chunks_for_prompt_and_citations():
     callback = processor.analyze(job)
 
     assert callback.analysis_status == "COMPLETED"
+    assert "COST_RESULT" in gemini_client.last_prompt
+    assert "원가 총액과 항목별 합계" in gemini_client.last_prompt
     assert "chunk-1" in gemini_client.last_prompt
     assert "chunk-5" in gemini_client.last_prompt
     assert "chunk-6" not in gemini_client.last_prompt
@@ -62,7 +64,18 @@ def _job(chunks: list[str | None]) -> VitamateAnalysisJob:
     return VitamateAnalysisJob(
         analysisId=1,
         attemptId="attempt-1",
-        prompt="핵심 요구사항을 정리해줘.",
+        reviewType="COST_REPORT",
+        reviewCategoryCodes=["COST_RESULT"],
+        additionalInstruction="핵심 요구사항을 정리해줘.",
+        reviewTemplates=[
+            {
+                "reviewType": "COST_REPORT",
+                "categoryCode": "COST_RESULT",
+                "categoryName": "I. 원가계산 결과",
+                "promptTemplate": "원가 총액과 항목별 합계가 일치하는지 검토합니다.",
+                "templateVersion": "COST_REPORT_V1",
+            }
+        ],
         searchScope={
             "projectId": 1,
             "blockId": 900001,

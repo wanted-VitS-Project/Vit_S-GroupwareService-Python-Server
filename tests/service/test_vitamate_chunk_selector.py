@@ -66,7 +66,18 @@ def _job(documents: list[dict]) -> VitamateAnalysisJob:
     return VitamateAnalysisJob(
         analysisId=1,
         attemptId="attempt-1",
-        prompt="핵심 요구사항을 정리해줘.",
+        reviewType="COST_REPORT",
+        reviewCategoryCodes=["COST_RESULT"],
+        additionalInstruction="핵심 요구사항을 정리해줘.",
+        reviewTemplates=[
+            {
+                "reviewType": "COST_REPORT",
+                "categoryCode": "COST_RESULT",
+                "categoryName": "I. 원가계산 결과",
+                "promptTemplate": "원가 총액과 항목별 합계가 일치하는지 검토합니다.",
+                "templateVersion": "COST_REPORT_V1",
+            }
+        ],
         searchScope={
             "projectId": 1,
             "blockId": 900001,

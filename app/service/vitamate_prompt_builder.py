@@ -21,11 +21,35 @@ class VitamatePromptBuilder:
     ) -> str:
         # 이미 선택된 chunk 목록을 사용해 프롬프트와 citation 근거를 일치시킵니다.
         chunks_text = self.build_chunks_text(selected_chunks)
+        review_templates_text = self.build_review_templates_text(job)
 
         return build_rfp_analysis_prompt(
-            user_prompt=job.prompt,
+            review_type=job.review_type,
+            review_templates_text=review_templates_text,
+            additional_instruction=job.additional_instruction,
             chunks_text=chunks_text,
         )
+
+    def build_review_templates_text(self, job: VitamateAnalysisJob) -> str:
+        # Spring이 내려준 요청 시점 템플릿을 카테고리별 검토 기준으로 정리합니다.
+        if not job.review_templates:
+            return "등록된 검토 템플릿이 없습니다. 사용자 추가 요청과 문서 chunk만 기준으로 검토합니다."
+
+        lines: list[str] = []
+        for template in job.review_templates:
+            lines.append(
+                "\n".join(
+                    [
+                        (
+                            f"[{template.category_code}] {template.category_name} "
+                            f"(version={template.template_version})"
+                        ),
+                        template.prompt_template,
+                    ]
+                )
+            )
+
+        return "\n\n".join(lines)
 
     def build_chunks_text(self, selected_chunks: list[SelectedVitamateChunk]) -> str:
         # selector가 고른 chunk만 Gemini 입력 텍스트로 변환합니다.
