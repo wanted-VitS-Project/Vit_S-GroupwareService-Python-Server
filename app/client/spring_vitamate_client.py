@@ -4,6 +4,8 @@ from app.client.dto import (
     VitamateAnalysisJob,
     VitamateCallbackRequest,
     VitamateCallbackResponse,
+    VitamateChromaCleanupCallbackRequest,
+    VitamateChromaCleanupCallbackResponse,
     VitamateDocumentChunkSaveRequest,
     VitamateDocumentChunkSaveResponse,
     VitamateChunkEmbeddingSaveRequest,
@@ -150,3 +152,26 @@ class SpringVitamateClient:
 
         self._raise_for_response(response)
         return VitamateFileIndexCallbackResponse.model_validate(response.json())
+
+    def send_chroma_cleanup_callback(
+        self,
+        cleanup_job_id: int,
+        callback: VitamateChromaCleanupCallbackRequest,
+    ) -> VitamateChromaCleanupCallbackResponse:
+        # ChromaDB 벡터 삭제 상태를 Spring cleanup job에 반영합니다.
+        url = (
+            f"{self._base_url}/internal/v1/vitamate/"
+            f"chroma-cleanup-jobs/{cleanup_job_id}/callback"
+        )
+
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.post(
+                url,
+                headers=self._headers(),
+                json=callback.model_dump(by_alias=True),
+            )
+
+        self._raise_for_response(response)
+        return VitamateChromaCleanupCallbackResponse.model_validate(
+            response.json()
+        )
