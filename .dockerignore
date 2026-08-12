@@ -1,0 +1,14 @@
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+tests/
+*.csv
+.env
+.env.*
+deploy/
+README.md
+.gitignore
