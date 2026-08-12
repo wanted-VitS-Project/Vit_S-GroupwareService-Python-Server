@@ -18,7 +18,7 @@ services:
 
   # 헬스 체크용 FastAPI(/health). 배포 워크플로가 host:8000 으로 기동 확인.
   health:
-    image: ${ECR_REGISTRY}/team05/python:latest
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: [.env]
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -27,7 +27,7 @@ services:
 
   # RFP 분석 워커 (vitamate:analysis:jobs)
   worker-analysis:
-    image: ${ECR_REGISTRY}/team05/python:latest
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: [.env]
     environment:
@@ -38,7 +38,7 @@ services:
 
   # 파일 인덱싱 워커 (vitamate:file-index:jobs → Chroma 임베딩 저장)
   worker-fileindex:
-    image: ${ECR_REGISTRY}/team05/python:latest
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: [.env]
     environment:
@@ -49,7 +49,7 @@ services:
 
   # Chroma 정리 워커 (vitamate:chroma-cleanup:jobs)
   worker-cleanup:
-    image: ${ECR_REGISTRY}/team05/python:latest
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: [.env]
     environment:
@@ -60,7 +60,7 @@ services:
 
   # 입찰 공고 요약 워커 (bidding:summary:jobs) — 백엔드가 아직 발행 안 함(휴면)
   worker-bidding:
-    image: ${ECR_REGISTRY}/team05/python:latest
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: [.env]
     command: ["python", "-m", "app.bidding.worker.bid_notice_summary_worker"]
