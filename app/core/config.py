@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     vitamate_stream_key: str = "vitamate:analysis:jobs"
     vitamate_consumer_group: str = "vitamate-python-workers"
     vitamate_consumer_name: str = "vitamate-worker-local"
+
+    # 입찰 공고 AI 요약 worker 설정
+    bidding_worker_token: str = ""
+    bidding_summary_stream_key: str = "bidding:summary:jobs"
+    bidding_summary_consumer_group: str = "bidding-summary-workers"
+    bidding_summary_consumer_name: str = "bidding-summary-worker-local"
+    bidding_summary_claim_min_idle_ms: int = 60_000
+    bidding_summary_claim_count: int = 10
     
     vitamate_file_index_stream_key: str = "vitamate:file-index:jobs"
     vitamate_file_index_consumer_group: str = "vitamate-file-index-workers"
