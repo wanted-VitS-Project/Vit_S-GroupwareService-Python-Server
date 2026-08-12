@@ -87,7 +87,9 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     restart: unless-stopped
-    privileged: true
+    # privileged 대신 최소 권한: /dev/kmsg 만 부여(비privileged 로 컨테이너 메트릭 수집 확인됨)
+    devices:
+      - /dev/kmsg:/dev/kmsg
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
