@@ -1,20 +1,31 @@
-name: Deploy ChatBot (④ EC2)
+name: Deploy Python Workers (③ EC2)
+
+# BE/FE 와 동일한 OIDC 키리스 패턴.
+#   러너가 GitHub Secrets/Variables 로 .env 조립 → S3(SSE) → SSM → compose.
+# ⚠️ PUBLIC 레포다. 계정ID·ARN·버킷명을 여기 박지 않는다 — 전부 vars/secrets 로 뺐다.
+#   (CHROMA_HOST/PORT 는 토폴로지 상수라 compose 에 직접 있음 — .env 조립 대상 아님)
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
+    paths:
+      - 'app/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'deploy/**'
+      - '.github/workflows/deploy.yml'
 
-# 동시 배포 방지
 concurrency:
-  group: deploy-chatbot-${{ github.ref }}
+  group: deploy-python-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ap-northeast-2
-  ECR_REPO: team05/python
-  S3_PREFIX: s3://team05-01-deploy-0708-635249349258-ap-northeast-2-an/chatbot/
-  EC2_NAME_TAG: team05-01-python        # ⚠️ 파이썬 박스의 실제 Name 태그와 일치해야 함
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
+  ECR_REPO: team05/python                      # 기존 team05 ECR repo 재사용
+  S3_PREFIX: ${{ vars.S3_DEPLOY_PREFIX }}      # 예: s3://<bucket>/vitamins/python/
+  EC2_NAME_TAG: ${{ vars.EC2_NAME_TAG }}       # 예: team05-01-python
 
 jobs:
   deploy:
@@ -24,19 +35,19 @@ jobs:
       contents: read
     steps:
       - name: 코드 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
-      - name: AWS 자격증명 (OIDC, team05-github-actions)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: AWS 자격증명 (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: arn:aws:iam::635249349258:role/team05-github-actions
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: ECR 로그인
         id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
       - name: 이미지 빌드 & ECR 푸시
         env:
@@ -51,24 +62,36 @@ jobs:
       - name: .env 조립 (GitHub Secrets/Variables → 파일, 값은 로그 마스킹)
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}        # 커밋별 태그 고정 → 롤백/재현 가능(:latest 이동성 회피)
+          APP_ENV: prod
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          GEMINI_REASON_MODEL: ${{ vars.GEMINI_REASON_MODEL || vars.GEMINI_MODEL }}
-          LEARNING_EMBEDDING_TIMEOUT_MS: ${{ vars.LEARNING_EMBEDDING_TIMEOUT_MS }}
-          DEFAULT_MAX_LENGTH: ${{ vars.DEFAULT_MAX_LENGTH }}
-          DB_HOST: ${{ vars.DB_HOST }}
-          DB_PORT: ${{ vars.DB_PORT }}
-          DB_NAME: ${{ vars.DB_NAME }}
-          DB_USERNAME: ${{ vars.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          GEMINI_EMBEDDING_MODEL: ${{ vars.GEMINI_EMBEDDING_MODEL }}
+          SPRING_BASE_URL: ${{ vars.SPRING_BASE_URL }}
+          VITAMATE_WORKER_TOKEN: ${{ secrets.VITAMATE_WORKER_TOKEN }}
+          BIDDING_WORKER_TOKEN: ${{ secrets.BIDDING_WORKER_TOKEN }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
           set -euo pipefail
           umask 077
+          # ── 필수 값 가드 ── 누락 시 워커가 조용히 localhost 기본값으로 떨어져 아무 일도 안 함 → 배포를 여기서 실패시킨다.
+          missing=""
+          for k in GEMINI_API_KEY SPRING_BASE_URL VITAMATE_WORKER_TOKEN REDIS_URL; do
+            [ -z "${!k:-}" ] && missing="$missing $k"
+          done
+          if [ -n "$missing" ]; then
+            echo "❌ 필수 GitHub Secret/Variable 누락:$missing"
+            echo "   → 레포 Settings → Secrets and variables → Actions 에 등록 후 재실행."
+            exit 1
+          fi
           : > deploy.env
-          for k in ECR_REGISTRY GEMINI_API_KEY GEMINI_MODEL GEMINI_REASON_MODEL \
-                   LEARNING_EMBEDDING_TIMEOUT_MS DEFAULT_MAX_LENGTH \
-                   DB_HOST DB_PORT DB_NAME DB_USERNAME DB_PASSWORD; do
-            v="${!k}"
+          # 빈 값은 건너뜀 → 앱 기본값 유지
+          for k in ECR_REGISTRY IMAGE_TAG APP_ENV LOG_LEVEL \
+                   GEMINI_API_KEY GEMINI_MODEL GEMINI_EMBEDDING_MODEL \
+                   SPRING_BASE_URL VITAMATE_WORKER_TOKEN BIDDING_WORKER_TOKEN \
+                   REDIS_URL; do
+            v="${!k:-}"
             [ -n "$v" ] && printf '%s=%s\n' "$k" "$v" >> deploy.env
           done
 
@@ -78,7 +101,7 @@ jobs:
           aws s3 sync deploy/ "$S3_PREFIX" --exclude '.env.example'
           aws s3 cp deploy.env "${S3_PREFIX}.env" --sse AES256
 
-      - name: ④ EC2에서 받아 기동 (SSM send-command — 시크릿 없음)
+      - name: ③ EC2에서 받아 기동 (SSM send-command — 시크릿 없음)
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
@@ -89,37 +112,47 @@ jobs:
           echo "대상 인스턴스: $INSTANCE_ID"
           if [ -z "$INSTANCE_ID" ]; then echo "running 인스턴스 없음"; exit 1; fi
 
-          # EC2 명령: S3에서 .env·compose 받기 → ECR 로그인 → Chroma 동기화 → compose up → 헬스체크
-          # 기존 chatbot은 계속 요청을 처리하고, 쓰기 작업은 일회성 ingestion 컨테이너 하나만 수행한다.
-          # ingestion이 실패하면 set -e로 배포만 중단되므로 기존 chatbot은 영향 없이 계속 실행된다.
           cat > params.json <<EOF
           {"commands":[
             "set -e",
+            "ts() { TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S KST'; }",
             "export ECR_REGISTRY=$REGISTRY",
-            "mkdir -p /opt/chatbot",
-            "aws s3 sync $S3_PREFIX /opt/chatbot",
-            "cd /opt/chatbot",
+            "echo \"[\$(ts)] === 배포 시작 (Python) ===\"",
+            "mkdir -p /opt/python",
+            "aws s3 sync $S3_PREFIX /opt/python --delete",
+            "cd /opt/python",
             "chmod 600 .env 2>/dev/null || true",
             "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REGISTRY",
             "docker compose pull",
-            "docker compose run --rm --no-deps chatbot python -m ingestion.run_ingest",
-            "docker compose up -d",
-            "echo '준비 상태 확인: localhost:8000/ready 대기...'",
-            "for i in \$(seq 1 30); do curl -fs -o /dev/null http://localhost:8000/ready && { echo 'OK: Chroma ready'; break; }; [ \$i -eq 30 ] && { echo 'FAIL: 60초 후에도 Chroma가 준비되지 않음'; docker compose logs --tail 50; exit 1; }; sleep 2; done",
-            "docker image prune -f"
+            "docker compose up -d --remove-orphans",
+            "echo \"[\$(ts)] 기동 확인: localhost:8000/health 대기...\"",
+            "for i in \$(seq 1 40); do code=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health || true); [ \"\$code\" = \"200\" ] && { echo \"[\$(ts)] OK: health 200\"; break; }; [ \$i -eq 40 ] && { echo \"[\$(ts)] FAIL: 200초 후에도 무응답(\$code)\"; docker compose logs --tail 80; exit 1; }; sleep 5; done",
+            "docker image prune -f",
+            "echo \"[\$(ts)] === 배포 완료 (Python) ===\""
           ]}
           EOF
 
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --comment "Deploy chatbot ${{ github.sha }}" \
+            --comment "Deploy vitamins-python ${{ github.sha }}" \
             --timeout-seconds 600 \
             --parameters file://params.json \
             --query "Command.CommandId" --output text)
           echo "CommandId: $CMD_ID"
 
-          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" || true
+          # SSM 상태 폴링 — `wait command-executed` 는 ~100초(20회×5s)만에 포기해 InProgress 를 반환할 수 있다.
+          #   이미지 pull 이 길면(chromadb+파이썬) 그 사이 아직 InProgress → 아래 검사가 오탐 실패한다.
+          #   → 종료 상태가 될 때까지 timeout(600s) 전 구간을 직접 폴링한다.
+          STATUS=Pending
+          for _ in $(seq 1 120); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
+              --query "Status" --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut) break ;;
+            esac
+            sleep 5
+          done
 
           echo "===== EC2 표준 출력 ====="
           aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \

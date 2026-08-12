@@ -9,3 +9,12 @@ venv/
 dist/
 build/
 .pytest_cache/
+.ai/local/
+.vscode/
+
+# Local ChromaDB data
+chroma/
+chroma-data/
+
+# IntelliJ
+.idea/
