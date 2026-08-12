@@ -47,16 +47,18 @@ services:
     command: ["python", "-m", "app.worker.vitamate_file_index_worker"]
     depends_on: [chroma]
 
-  # Chroma 정리 워커 (vitamate:chroma-cleanup:jobs)
-  worker-cleanup:
-    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    env_file: [.env]
-    environment:
-      CHROMA_HOST: chroma
-      CHROMA_PORT: "8000"
-    command: ["python", "-m", "app.worker.vitamate_chroma_cleanup_worker"]
-    depends_on: [chroma]
+  # Chroma 정리 워커 (vitamate:chroma-cleanup:jobs) — 🚧 비활성.
+  #   app/service/chroma/vitamate_chroma_cleanup_service.py 가 레포에 없어(미커밋) import 단계에서 크래시.
+  #   팀이 해당 소스 커밋 후 아래 주석 해제.
+  # worker-cleanup:
+  #   image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+  #   restart: unless-stopped
+  #   env_file: [.env]
+  #   environment:
+  #     CHROMA_HOST: chroma
+  #     CHROMA_PORT: "8000"
+  #   command: ["python", "-m", "app.worker.vitamate_chroma_cleanup_worker"]
+  #   depends_on: [chroma]
 
   # 입찰 공고 요약 워커 (bidding:summary:jobs) — 백엔드가 아직 발행 안 함(휴면)
   worker-bidding:
