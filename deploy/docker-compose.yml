@@ -67,5 +67,35 @@ services:
     env_file: [.env]
     command: ["python", "-m", "app.bidding.worker.bid_notice_summary_worker"]
 
+  # ── 모니터링 exporter (Prometheus 스크레이프: node :9100, cAdvisor :8081) ──
+  #   접근 제한: 이 박스 SG 인바운드 9100·8081 은 모니터링 SG 에서만 허용.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    pid: host
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "9100:9100"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8081:8080"
+
 volumes:
   chroma-data:
