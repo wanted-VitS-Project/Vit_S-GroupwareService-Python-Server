@@ -44,3 +44,7 @@ websockets==16.1.1
 redis==7.1.0
 google-generativeai
 chromadb
+# 문서 추출기(app/service/extractor/*)가 임포트하나 requirements 에 누락돼 있던 런타임 의존성
+python-docx
+openpyxl
+pypdf
