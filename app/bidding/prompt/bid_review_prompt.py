@@ -30,8 +30,10 @@ _OUTPUT_INSTRUCTIONS = """
 [출력 규칙]
 - result는 다음 순서로 작성한 한국어 검토 결과 텍스트입니다: 1) 검토 요약 2) 충족 항목 3) 불일치·누락
   항목 4) 위험 요소와 확인 필요 질문.
-- citations[]의 documentRole과 식별자(attachmentId/referenceFileId/companyDocumentVersionId)는
-  아래 각 문서 블록 머리에 표시된 값과 정확히 일치해야 합니다 - 새로 지어내지 않습니다.
+- citations[]의 documentRole은 "BID_ATTACHMENT", "INTERNAL_REFERENCE", "COMPANY_DOCUMENT_REFERENCE"
+  중 정확히 하나의 코드값이어야 합니다 - "공고 첨부" 같은 한글 설명으로 바꿔 쓰지 않습니다.
+  식별자(attachmentId/referenceFileId/companyDocumentVersionId)는 아래 각 문서 블록 머리에 표시된
+  값과 정확히 일치해야 합니다 - 새로 지어내지 않습니다.
 - 표에 없는 문서를 근거로 인용하지 않습니다.
 - 페이지·섹션 표시가 있는 문서는 pageNumber 또는 sheetName을 함께 채웁니다. 없으면 null입니다.
 """.strip()

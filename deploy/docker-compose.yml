@@ -1,0 +1,103 @@
+# Vit_S Python AI 워커 배포 스택 (파이썬 박스 전용)
+#   chroma(벡터DB) + health(uvicorn) + 워커 4종. 모두 같은 이미지, command 로만 구분.
+#   실제 시크릿·URL 은 러너가 조립한 .env 로 주입한다(env_file). CHROMA_HOST 등 토폴로지 상수만 여기 박는다.
+name: vitamins-python
+
+services:
+  # 벡터 저장소. 워커가 chroma:8000 으로 접속(HttpClient). 데이터는 named volume 에 영속.
+  chroma:
+    image: chromadb/chroma:latest
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - chroma-data:/chroma/chroma
+    expose:
+      - "8000"          # 호스트 비노출 — compose 내부에서만
+
+  # 헬스 체크용 FastAPI(/health). 배포 워크플로가 host:8000 으로 기동 확인.
+  health:
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+
+  # RFP 분석 워커 (vitamate:analysis:jobs)
+  worker-analysis:
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    command: ["python", "-m", "app.worker.vitamate_worker"]
+    depends_on: [chroma]
+
+  # 파일 인덱싱 워커 (vitamate:file-index:jobs → Chroma 임베딩 저장)
+  worker-fileindex:
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    command: ["python", "-m", "app.worker.vitamate_file_index_worker"]
+    depends_on: [chroma]
+
+  # Chroma 정리 워커 (vitamate:chroma-cleanup:jobs) — 🚧 비활성.
+  #   app/service/chroma/vitamate_chroma_cleanup_service.py 가 레포에 없어(미커밋) import 단계에서 크래시.
+  #   팀이 해당 소스 커밋 후 아래 주석 해제.
+  # worker-cleanup:
+  #   image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+  #   restart: unless-stopped
+  #   env_file: [.env]
+  #   environment:
+  #     CHROMA_HOST: chroma
+  #     CHROMA_PORT: "8000"
+  #   command: ["python", "-m", "app.worker.vitamate_chroma_cleanup_worker"]
+  #   depends_on: [chroma]
+
+  # 입찰 공고 요약 워커 (bidding:summary:jobs) — 백엔드가 아직 발행 안 함(휴면)
+  worker-bidding:
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["python", "-m", "app.bidding.worker.bid_notice_summary_worker"]
+
+  # ── 모니터링 exporter (Prometheus 스크레이프: node :9100, cAdvisor :8081) ──
+  #   접근 제한: 이 박스 SG 인바운드 9100·8081 은 모니터링 SG 에서만 허용.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    pid: host
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "9100:9100"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    # privileged 대신 최소 권한: /dev/kmsg 만 부여(비privileged 로 컨테이너 메트릭 수집 확인됨)
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8081:8080"
+
+volumes:
+  chroma-data:

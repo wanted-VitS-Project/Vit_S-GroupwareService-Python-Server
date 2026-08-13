@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -303,9 +304,17 @@ class BidReviewCallbackResponse(BaseModel):
 
 
 class GeminiBidReviewCitation(BaseModel):
-    """Gemini가 생성하는 근거 한 건입니다. rankOrder는 여기 없다 - Python이 목록 순서로 매긴다."""
+    """Gemini가 생성하는 근거 한 건입니다. rankOrder는 여기 없다 - Python이 목록 순서로 매긴다.
 
-    document_role: str = Field(alias="documentRole")
+    documentRole을 Literal로 못박아 JSON 스키마에 enum 제약을 건다 - 실측 결과 이렇게 안 하면
+    Gemini가 "공고 첨부" 같은 한글 라벨을 자유롭게 지어내 citation이 통째로 드롭됐다(2026-08-13 확인).
+    """
+
+    document_role: Literal[
+        "BID_ATTACHMENT",
+        "INTERNAL_REFERENCE",
+        "COMPANY_DOCUMENT_REFERENCE",
+    ] = Field(alias="documentRole")
     bid_attachment_id: int | None = Field(default=None, alias="bidAttachmentId")
     reference_file_id: int | None = Field(default=None, alias="referenceFileId")
     company_document_version_id: int | None = Field(

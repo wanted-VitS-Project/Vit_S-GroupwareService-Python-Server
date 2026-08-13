@@ -15,3 +15,6 @@ build/
 # Local ChromaDB data
 chroma/
 chroma-data/
+
+# IntelliJ
+.idea/
