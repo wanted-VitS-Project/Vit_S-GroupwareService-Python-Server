@@ -31,7 +31,14 @@ class Settings(BaseSettings):
     bidding_summary_consumer_name: str = "bidding-summary-worker-local"
     bidding_summary_claim_min_idle_ms: int = 60_000
     bidding_summary_claim_count: int = 10
-    
+
+    # 입찰 문서 비교 검토 worker 설정 (bidding_worker_token 재사용 - 같은 /internal/v1/bidding 경로)
+    bidding_review_stream_key: str = "bidding:review:jobs"
+    bidding_review_consumer_group: str = "bidding-review-workers"
+    bidding_review_consumer_name: str = "bidding-review-worker-local"
+    bidding_review_claim_min_idle_ms: int = 60_000
+    bidding_review_claim_count: int = 10
+
     vitamate_file_index_stream_key: str = "vitamate:file-index:jobs"
     vitamate_file_index_consumer_group: str = "vitamate-file-index-workers"
     vitamate_file_index_consumer_name: str = "vitamate-file-index-worker-local"

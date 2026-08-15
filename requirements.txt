@@ -48,3 +48,4 @@ chromadb
 python-docx
 openpyxl
 pypdf
+olefile
