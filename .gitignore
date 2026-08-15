@@ -13,8 +13,8 @@ build/
 .vscode/
 
 # Local ChromaDB data
-chroma/
-chroma-data/
+/chroma/
+/chroma-data/
 
 # IntelliJ
 .idea/

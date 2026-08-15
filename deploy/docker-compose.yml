@@ -47,18 +47,17 @@ services:
     command: ["python", "-m", "app.worker.vitamate_file_index_worker"]
     depends_on: [chroma]
 
-  # Chroma 정리 워커 (vitamate:chroma-cleanup:jobs) — 🚧 비활성.
-  #   app/service/chroma/vitamate_chroma_cleanup_service.py 가 레포에 없어(미커밋) import 단계에서 크래시.
-  #   팀이 해당 소스 커밋 후 아래 주석 해제.
-  # worker-cleanup:
-  #   image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
-  #   restart: unless-stopped
-  #   env_file: [.env]
-  #   environment:
-  #     CHROMA_HOST: chroma
-  #     CHROMA_PORT: "8000"
-  #   command: ["python", "-m", "app.worker.vitamate_chroma_cleanup_worker"]
-  #   depends_on: [chroma]
+  # Chroma 정리 워커 (vitamate:chroma-cleanup:jobs) — 파일 영구삭제 후 벡터 정리.
+  #   2026-08-12 비활성 사유(cleanup_service 미커밋)는 2fee8d1f 로 해소됨.
+  worker-cleanup:
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+    command: ["python", "-m", "app.worker.vitamate_chroma_cleanup_worker"]
+    depends_on: [chroma]
 
   # 입찰 공고 요약 워커 (bidding:summary:jobs) — 백엔드가 아직 발행 안 함(휴면)
   worker-bidding:
@@ -66,6 +65,16 @@ services:
     restart: unless-stopped
     env_file: [.env]
     command: ["python", "-m", "app.bidding.worker.bid_notice_summary_worker"]
+
+  # 입찰 첨부·사내문서 비교 검토 워커 (bidding:review:jobs)
+  #   Chroma 미사용 — 첨부를 직접 내려받아 텍스트 추출 후 Gemini 호출한다
+  #   (bid_review_processor → document_loader → file_downloader 경로에 벡터 조회 없음).
+  #   그래서 위 vitamate 워커들과 달리 CHROMA_HOST·depends_on 을 두지 않는다.
+  worker-bid-review:
+    image: ${ECR_REGISTRY}/team05/python:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["python", "-m", "app.bidding.worker.bid_review_worker"]
 
   # ── 모니터링 exporter (Prometheus 스크레이프: node :9100, cAdvisor :8081) ──
   #   접근 제한: 이 박스 SG 인바운드 9100·8081 은 모니터링 SG 에서만 허용.
