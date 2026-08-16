@@ -1,4 +1,6 @@
-﻿from google import genai
+﻿import httpx
+from google import genai
+from google.genai import errors
 
 from app.core.config import Settings
 from app.core.exceptions import VitamateAiGenerateError
@@ -21,8 +23,30 @@ class GeminiEmbeddingClient:
                 model=self._model_name,
                 contents=text.strip(),
             )
+        except VitamateAiGenerateError:
+            raise
+        except errors.ServerError as exc:
+            raise VitamateAiGenerateError(
+                "Gemini server temporarily unavailable",
+                retryable=True,
+            ) from exc
+        except errors.ClientError as exc:
+            raise VitamateAiGenerateError(
+                "Gemini rate limit exceeded"
+                if exc.code == 429
+                else "Gemini request or configuration is invalid",
+                retryable=exc.code == 429,
+            ) from exc
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise VitamateAiGenerateError(
+                "Gemini connection temporarily failed",
+                retryable=True,
+            ) from exc
         except Exception as exc:
-            raise VitamateAiGenerateError("Gemini embedding request failed") from exc
+            raise VitamateAiGenerateError(
+                "Gemini embedding request failed",
+                retryable=False,
+            ) from exc
 
         embeddings = response.embeddings or []
         if not embeddings or not embeddings[0].values:

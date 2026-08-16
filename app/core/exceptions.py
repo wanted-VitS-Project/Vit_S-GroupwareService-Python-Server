@@ -25,3 +25,7 @@ class SpringVitamateBadRequestError(SpringVitamateClientError):
 
 class VitamateAiGenerateError(Exception):
     """비타메이트 AI 분석 생성 실패를 표현합니다."""
+
+    def __init__(self, message: str, *, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable

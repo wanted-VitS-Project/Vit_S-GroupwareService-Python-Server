@@ -85,6 +85,9 @@ class VitamateFileIndexCallbackRequest(BaseModel):
     index_status: str = Field(alias="indexStatus")
     index_attempt_id: str | None = Field(default=None, alias="indexAttemptId")
     error_message: str | None = Field(default=None, alias="errorMessage")
+    # FAILED일 때만 의미가 있다. true면 Gemini 429/크레딧 소진 등 일시적 실패라 Spring이 재시도
+    # 상한 안에서 즉시 재큐잉한다.
+    retryable: bool = False
 
     model_config = {
         "populate_by_name": True,
