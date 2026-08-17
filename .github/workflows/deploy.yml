@@ -119,7 +119,8 @@ jobs:
             "export ECR_REGISTRY=$REGISTRY",
             "echo \"[\$(ts)] === 배포 시작 (Python) ===\"",
             "mkdir -p /opt/python",
-            "aws s3 sync $S3_PREFIX /opt/python --delete",
+            "aws s3 sync $S3_PREFIX /opt/python --delete --exclude '.env'",
+            "aws s3 cp ${S3_PREFIX}.env /opt/python/.env",
             "cd /opt/python",
             "chmod 600 .env 2>/dev/null || true",
             "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $REGISTRY",
@@ -127,6 +128,9 @@ jobs:
             "docker compose up -d --remove-orphans",
             "echo \"[\$(ts)] 기동 확인: localhost:8000/health 대기...\"",
             "for i in \$(seq 1 40); do code=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health || true); [ \"\$code\" = \"200\" ] && { echo \"[\$(ts)] OK: health 200\"; break; }; [ \$i -eq 40 ] && { echo \"[\$(ts)] FAIL: 200초 후에도 무응답(\$code)\"; docker compose logs --tail 80; exit 1; }; sleep 5; done",
+            "sleep 12",
+            "for c in \$(docker ps -aq --filter 'label=com.docker.compose.project=vitamins-python'); do rc=\$(docker inspect -f '{{.RestartCount}}' \"\$c\"); nm=\$(docker inspect -f '{{.Name}}' \"\$c\"); if [ \"\$rc\" -gt 3 ]; then echo \"[\$(ts)] FAIL: \$nm 재시작 \$rc회 — 크래시 루프\"; docker logs --tail 40 \"\$c\"; exit 1; fi; done",
+            "echo \"[\$(ts)] OK: 컨테이너 크래시 루프 없음\"",
             "docker image prune -f",
             "echo \"[\$(ts)] === 배포 완료 (Python) ===\""
           ]}
