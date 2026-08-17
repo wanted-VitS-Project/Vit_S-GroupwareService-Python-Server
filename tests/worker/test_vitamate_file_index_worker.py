@@ -17,6 +17,7 @@ from app.client.dto import (
 from app.core.exceptions import (
     SpringVitamateJobNotFoundError,
     SpringVitamateTemporaryError,
+    VitamateAiGenerateError,
 )
 from app.service.extractor.document_text_extractor import ExtractedTextPage
 from app.worker.vitamate_file_index_worker import VitamateFileIndexRedisWorker
@@ -56,6 +57,31 @@ def test_handle_message_sends_failed_callback_when_processing_crashes_then_acks(
     ]
     assert sent_statuses == ["PROCESSING", "FAILED"]
     assert spring_client.send_file_index_callback.call_args_list[1].kwargs["callback"].index_attempt_id == INDEX_ATTEMPT_ID
+    ack.assert_called_once_with(MESSAGE_ID)
+
+
+def test_handle_message_marks_retryable_when_gemini_rate_limited():
+    worker, spring_client, ack = _worker_with_fakes()
+    spring_client.send_file_index_callback.side_effect = [_response("PROCESSING"), _response("FAILED")]
+    worker._process_file_index.side_effect = VitamateAiGenerateError("Gemini rate limit exceeded", retryable=True)
+
+    worker._handle_message(MESSAGE_ID, _raw_payload())
+
+    failed_callback = spring_client.send_file_index_callback.call_args_list[1].kwargs["callback"]
+    assert failed_callback.index_status == "FAILED"
+    assert failed_callback.retryable is True
+    ack.assert_called_once_with(MESSAGE_ID)
+
+
+def test_handle_message_marks_not_retryable_for_permanent_ai_error():
+    worker, spring_client, ack = _worker_with_fakes()
+    spring_client.send_file_index_callback.side_effect = [_response("PROCESSING"), _response("FAILED")]
+    worker._process_file_index.side_effect = VitamateAiGenerateError("Gemini returned empty embedding")
+
+    worker._handle_message(MESSAGE_ID, _raw_payload())
+
+    failed_callback = spring_client.send_file_index_callback.call_args_list[1].kwargs["callback"]
+    assert failed_callback.retryable is False
     ack.assert_called_once_with(MESSAGE_ID)
 
 

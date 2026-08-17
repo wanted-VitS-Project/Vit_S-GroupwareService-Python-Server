@@ -18,6 +18,7 @@ from app.core.exceptions import (
     SpringVitamateBadRequestError,
     SpringVitamateJobNotFoundError,
     SpringVitamateTemporaryError,
+    VitamateAiGenerateError,
 )
 from app.service.extractor.document_text_extractor import ExtractedTextPage
 from app.service.vitamate_chunk_embedding_service import VitamateChunkEmbeddingService
@@ -124,13 +125,21 @@ class VitamateFileIndexRedisWorker:
             )
             self._ack(message_id)
             return
-        except Exception:
+        except VitamateAiGenerateError as exc:
+            logger.exception(
+                "Vitamate file index AI/embedding request failed fileVersionId=%s retryable=%s",
+                message.file_version_id, exc.retryable,
+            )
+            if self._try_failed_callback(message.file_version_id, index_attempt_id, str(exc), retryable=exc.retryable):
+                self._ack(message_id)
+            return
+        except Exception as exc:
             logger.exception(
                 "Vitamate file index processing failed fileVersionId=%s",
                 message.file_version_id,
             )
 
-            if self._try_failed_callback(message.file_version_id, index_attempt_id):
+            if self._try_failed_callback(message.file_version_id, index_attempt_id, str(exc)):
                 self._ack(message_id)
             return
 
@@ -214,6 +223,7 @@ class VitamateFileIndexRedisWorker:
         index_status: str,
         error_message: str | None,
         index_attempt_id: str | None = None,
+        retryable: bool = False,
     ) -> VitamateFileIndexCallbackResponse:
         # ?뚯씪 ?몃뜳???곹깭瑜?Spring???꾨떖?⑸땲??
         response = self._spring_client.send_file_index_callback(
@@ -222,6 +232,7 @@ class VitamateFileIndexRedisWorker:
                 indexStatus=index_status,
                 indexAttemptId=index_attempt_id,
                 errorMessage=error_message,
+                retryable=retryable,
             ),
         )
 
@@ -232,10 +243,23 @@ class VitamateFileIndexRedisWorker:
             response.accepted,
             response.index_status,
         )
+        if not response.accepted:
+            logger.warning(
+                "Vitamate file index callback not accepted fileVersionId=%s indexAttemptId=%s reason=%s",
+                response.file_version_id,
+                response.index_attempt_id,
+                response.reason,
+            )
 
         return response
 
-    def _try_failed_callback(self, file_version_id: int, index_attempt_id: str | None) -> bool:
+    def _try_failed_callback(
+        self,
+        file_version_id: int,
+        index_attempt_id: str | None,
+        error_message: str = "File indexing failed",
+        retryable: bool = False,
+    ) -> bool:
         # 泥섎━ ?ㅽ뙣 ?곹깭瑜?Spring????ν빐 ?몃뜳???곹깭媛 硫덉텛吏 ?딄쾶 ?⑸땲??
         if not index_attempt_id:
             logger.warning(
@@ -245,7 +269,7 @@ class VitamateFileIndexRedisWorker:
             return True
 
         try:
-            self._send_callback(file_version_id, "FAILED", "File indexing failed", index_attempt_id)
+            self._send_callback(file_version_id, "FAILED", error_message, index_attempt_id, retryable=retryable)
             return True
         except Exception:
             logger.exception(
